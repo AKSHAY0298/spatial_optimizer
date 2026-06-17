@@ -1,0 +1,76 @@
+\section{Results}
+
+% ==========================================
+% SLIDE 1: COMPUTATIONAL RESULTS (DATA)
+% ==========================================
+\begin{frame}[t]{Computational Results: Key Metrics}{}
+
+    \begin{block}{\centering Run Configuration}
+        \centering
+        \vspace{0.1cm}
+        {\small $\varepsilon = 40$\,km \hspace{0.5cm} min\_samples $=2$ \hspace{0.5cm} $\alpha = 0.5$ \hspace{0.5cm} $\beta = 0.22$}
+        \vspace{0.1cm}
+    \end{block}
+
+    \vspace{0.3cm}
+    \begin{columns}[T]
+        \column{0.48\textwidth}
+        \begin{block}{Phase 1: Search Space \& Clustering}
+            \centering
+            \renewcommand{\arraystretch}{1.3}
+            \begin{tabular}{@{}l r@{}}
+                \toprule
+                \textbf{Metric}             & \textbf{Value} \\
+                \midrule
+                Dense radius                & 27\,km \\
+                Sparse radius               & 89\,km \\
+                Clusters found              & 17 \\
+                Noise cities (isolated)     & 24 \\
+                Candidates generated        & 506 \\
+                \bottomrule
+            \end{tabular}
+        \end{block}
+
+        \column{0.48\textwidth}
+        \begin{block}{Phase 2: Optimization Outcome}
+            \centering
+            \renewcommand{\arraystretch}{1.3}
+            \begin{tabular}{@{}l r@{}}
+                \toprule
+                \textbf{Metric}             & \textbf{Value} \\
+                \midrule
+                Towers selected             & \textbf{52} \\
+                Coverage ratio              & \textbf{100\%} \\
+                Total tower cost            & 91.18 \\
+                Overlap penalty             & 1.96\% \\
+                Solver status               & Optimal \\
+                \bottomrule
+            \end{tabular}
+        \end{block}
+    \end{columns}
+\end{frame}
+
+% ==========================================
+% SLIDE 2: FINAL NETWORK TOPOLOGY (VISUAL)
+% ==========================================
+\begin{frame}[t]{Optimized 6G Network Topology}{}
+    \begin{columns}[T]
+        \column{0.70\textwidth}
+        \begin{center}
+            \vspace{-0.4cm}
+            \includegraphics[width=\textwidth,height=0.78\textheight,keepaspectratio]{./images/results vis.png}
+        \end{center}
+
+        \column{0.08\textwidth}
+
+        \column{0.22\textwidth}
+        \begin{block}{\centering Final KPIs}
+            \centering
+            \vspace{0.1cm}
+            {\small \textbf{Towers Built:}\\ \alert{52}} \\[8pt]
+            {\small \textbf{Coverage:}\\ \alert{100\%}} \\[8pt]
+            {\small \textbf{Overlap:}\\ \alert{$<$ 2\%}}
+            \vspace{0.1cm}
+        \end{block}
+    \end{columns}
+\end{frame}

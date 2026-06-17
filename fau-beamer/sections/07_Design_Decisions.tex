@@ -1,0 +1,89 @@
+\section{MILP Formulation}
+
+\begin{frame}[t]{Decision Variables \& Objective}{}
+    \begin{columns}[T]
+        \column{0.4\textwidth}
+        \begin{block}{Variables}
+            \begin{tabular}{@{}c l@{}}
+                \toprule
+                \textbf{Var} & \textbf{Meaning} \\
+                \midrule
+                $x_j$   & Tower $j$ selected? \\[2pt]
+                        & $\{0,1\}$ \\[6pt]
+                $y_{pq}$ & Interference active? \\[2pt]
+                         & $[0,1]$ \\[6pt]
+                $z_i$    & City $i$ covered? \\[2pt]
+                         & $\{0,1\}$ \\[6pt]
+                $P_{pq}$ & norm.\ overlap penalty \\
+                \bottomrule
+            \end{tabular}
+        \end{block}
+
+        \column{0.6\textwidth}
+        \begin{block}{Objective Function}
+            \begin{equation*}
+                \min \;
+                \alpha\!\sum_{j} c_j x_j
+                \;+\;
+                (1-\alpha)\!\sum_{(p,q)} P_{pq} y_{pq}
+                \;-\;
+                \beta\!\sum_{i} z_i
+            \end{equation*}
+
+            \vspace{0.15cm}
+            \begin{tabular}{@{}l l@{}}
+                \textcolor{FAUGreen}{$\alpha$} & cost vs.\ interference trade-off \\
+                \textcolor{FAUBlue}{$\beta$}  & coverage incentive \\
+            \end{tabular}
+        \end{block}
+    \end{columns}
+
+    \vspace{0.3cm}
+    \begin{columns}[T]
+        \column{0.5\textwidth}
+        \begin{block}{Coverage Link}
+            $z_i \;\le\; \displaystyle\sum_{j \text{ covering } i} x_j$
+            \vspace{4pt}
+
+            {\footnotesize A city counts as covered only if at least one tower that covers it is selected.}
+        \end{block}
+
+        \column{0.5\textwidth}
+        \begin{block}{Interference Linearization}
+            $y_{pq} \;\le\; x_p,\; y_{pq} \;\le\; x_q$\\
+            $y_{pq} \;\ge\; x_p + x_q - 1$
+            \vspace{4pt}
+
+            {\footnotesize Three linear constraints encode $y_{pq} = x_p \land x_q$.}
+        \end{block}
+    \end{columns}
+\end{frame}
+
+\begin{frame}[t]{Why $\alpha$ and $\beta$ Matter}{}
+    \begin{columns}[T]
+        \column{0.5\textwidth}
+        \begin{block}{$\alpha$: Cost vs.\ Interference}
+            \begin{itemize}
+                \item $\alpha = 1.0$: minimize cost, ignore interference
+                \item $\alpha = 0.0$: minimize interference, ignore cost
+                \item $\alpha = 0.5$: balance both equally
+            \end{itemize}
+            {\footnotesize Default in our runs: $\alpha = 0.5$}
+        \end{block}
+
+        \column{0.5\textwidth}
+        \begin{block}{$\beta$: Coverage Incentive}
+            \begin{itemize}
+                \item Without $\beta$: cheapest solution is 0 towers
+                \item $\beta > 0$: rewards covering more cities
+                \item Higher $\beta$ pushes coverage toward 100\%
+            \end{itemize}
+            {\footnotesize Default in our runs: $\beta = 0.8$}
+        \end{block}
+    \end{columns}
+
+    \vspace{0.3cm}
+    \begin{alertblock}{Practical Effect}
+        With $\alpha=0.5$, $\beta=0.8$: the solver finds a solution with \alert{99.6\% coverage} while keeping \alert{interference at 1.58\%} of total coverage area — a strong balance between the three competing objectives.
+    \end{alertblock}
+\end{frame}

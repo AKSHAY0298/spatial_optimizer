@@ -1,0 +1,79 @@
+\section{Problem Definition}
+
+\begin{frame}[t]{The Challenge: 6G Network Coverage}{}
+    \begin{center}
+    \begin{minipage}{0.95\textwidth} % change width here
+        \begin{block}{Goal}
+            Cover \alert{236 German cities} (population $>$ 50\,k) using cellular towers that operate at exactly \alert{two radii}.
+        \end{block}
+    \end{minipage}
+    \end{center}
+
+    \vspace{0.15cm}
+    \begin{columns}[T]
+        \column{0.3\textwidth}
+        \begin{block}{What We Control}
+            \begin{itemize}
+                \item \textbf{Where} to place each tower
+                \item \textbf{Which type} at each location:
+                \item Radii must lie in $[5,\,100]$\,km
+            \end{itemize}
+        \end{block}
+
+        \column{0.5\textwidth}
+        \begin{block}{What We Optimize}
+            \begin{enumerate}
+                \item Minimize \alert{installation cost}
+                \item Minimize \alert{signal interference} between overlapping towers
+            \end{enumerate}
+            \vspace{0.1cm}
+            \begin{center}
+                \small These two goals are in direct conflict.
+            \end{center}
+        \end{block}
+    \end{columns}
+
+    \vspace{0.2cm}
+    \begin{alertblock}{The Dilemma}
+        \textbf{Small radii} $\rightarrow$ cheap per tower, but need many $\rightarrow$ high interference.\\[2pt]
+        \textbf{Large radii} $\rightarrow$ few towers, but each is expensive and coverage overlaps heavily.
+    \end{alertblock}
+\end{frame}
+
+\begin{frame}[t]{Optimization Model}{}
+    
+    \begin{center}
+    \begin{minipage}{0.82\textwidth} % adjust width here
+        \begin{block}{Objective}
+            \begin{equation*}
+                \text{Minimize} \quad
+                \underbrace{\alpha \sum_{j \in J} c_j x_j}_{\text{Tower Cost}} \;+\;
+                \underbrace{(1-\alpha) \sum_{(p,q) \in E} P_{pq} \, y_{pq}}_{\text{Interference Penalty}}
+            \end{equation*}
+        \end{block}
+    \end{minipage}
+    \end{center}
+
+    \vspace{0.15cm}
+    \begin{columns}[T]
+        \column{0.35\textwidth}
+        \begin{block}{Structural Constraints}
+            \begin{itemize}
+                \item $\sum_{j} A_{ij} x_j \ge 1$\quad for every city $i$
+                \item $y_{pq} \le x_p,\; y_{pq} \le x_q$
+                \item $y_{pq} \ge x_p + x_q - 1$
+            \end{itemize}
+        \end{block}
+
+        \column{0.45\textwidth}
+        \begin{alertblock}{Why Not Solve Directly?}
+            Cost $c(r)$ is \alert{piecewise cubic} in $r$.\\
+            Jointly optimizing locations \emph{and} continuous radii creates a non-convex MINLP — slow and unreliable.
+        \end{alertblock}
+    \end{columns}
+
+    \vspace{0.1cm}
+    \begin{center}
+        \small\textbf{Our approach:} Pre-compute exactly two radii, then solve a purely linear MILP.
+    \end{center}
+\end{frame}

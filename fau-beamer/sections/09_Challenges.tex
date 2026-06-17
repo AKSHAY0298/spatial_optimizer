@@ -1,0 +1,28 @@
+\section[Limitations \& Outlook]{Limitations \& Future Work}
+
+\begin{frame}[t]{Limitations \& Future Work}{}
+    \begin{columns}[T]
+        \column{0.48\textwidth}
+        \begin{alertblock}{Current Limitations}
+            \begin{itemize}
+                \item \textbf{Two radii only.} Some towers would benefit from intermediate sizes. Pre-selecting exactly two values reduces flexibility.
+
+                \vspace{0.2cm}
+                \item \textbf{DBSCAN sensitivity.} Cluster count and noise assignment depend heavily on $\varepsilon$ and min\_samples. A poor clustering can degrade radius quality.
+            \end{itemize}
+        \end{alertblock}
+
+        \column{0.48\textwidth}
+        \begin{block}{Planned Improvements}
+            \begin{itemize}
+                \item \textbf{Local radius refinement.} After MILP selects tower locations, run gradient-based NLP to fine-tune each tower's radius independently.
+
+                \vspace{0.2cm}
+                \item \textbf{Automated clustering.} Grid-search over DBSCAN parameters to find the configuration that yields the best MILP objective.
+
+                \vspace{0.2cm}
+                \item \textbf{Additional tower types.} Extend from 2 to $k$ radii types with a minimal increase in candidate set size.
+            \end{itemize}
+        \end{block}
+    \end{columns}
+\end{frame}

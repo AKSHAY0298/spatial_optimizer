@@ -1,0 +1,129 @@
+% ..............................................................................
+% FAU Beamer Presentation: 6G Tower Placement Optimization
+% Meeting 2: System Architect Presentation
+%
+% Based on the fau-beamer template by Tim Roith <tim.roith@fau.de>
+% ..............................................................................
+
+\documentclass[final]{beamer}
+
+% ========================================================================================
+% Theme: inner, outer, font and colors
+% ----------------------------------------------------------------------------------------
+\usepackage[institute=FAU,
+			aspectratio=169,
+			fontsize=11,
+			fontbaselineskip=13,
+			scale=1.,
+			InsertTotalFoot
+		   ]{styles/beamerthemefau}
+
+% Input and output encoding
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+
+% Language settings
+\usepackage[english]{babel}
+
+% ========================================================================================
+% Fonts
+% - Helvet is loaded by styles/beamerfonts
+% - We use serif for math environments
+% - isomath is used for upGreek letters
+% ----------------------------------------------------------------------------------------
+\usepackage{isomath}
+\usefonttheme[onlymath]{serif}
+\usepackage{exscale}
+\usepackage{anyfontsize}
+\setbeamercolor{alerted text}{fg=BaseColor}
+
+% Custom commands for symbols
+\usepackage{styles/symbols}
+
+% Additional packages for this presentation
+\usepackage{amsmath, amssymb, amsfonts}
+\usepackage{tikz}
+\usetikzlibrary{positioning}
+\usepackage{pgfplots}
+\usepackage{multirow}
+\usepackage{tabularx}
+\usepackage{booktabs}
+\usepackage{xcolor}
+\usepackage{ragged2e}
+
+% Custom colors for this presentation
+\definecolor{FAUGreen}{RGB}{0, 160, 70}
+\definecolor{FAUBlue}{RGB}{0, 51, 102}
+\definecolor{FAURed}{RGB}{220, 20, 60}
+\definecolor{FAUOrange}{RGB}{255, 165, 0}
+\definecolor{FauGray}{RGB}{100, 100, 100}
+
+% ================================================
+% Setup for Titlepage
+% ------------------------------------------------
+\title[6G Tower Placement]{6G Tower Placement Optimization}
+\subtitle{System Architecture \& Refined Solution Approach}
+\author[Project Seminar]{
+Project Seminar Team
+}
+\institute[FAU]{%
+Friedrich-Alexander-Universität Erlangen-Nürnberg
+}
+
+\date{May 28, 2026}
+
+% ================================================
+% Hyperref and setup
+% ------------------------------------------------
+\usepackage{hyperref}
+\hypersetup{
+	colorlinks = true,
+	final=true, 
+	plainpages=false,
+	pdfstartview=FitV,
+	pdftoolbar=true,
+	pdfmenubar=true,
+	pdfencoding=auto,
+	psdextra,
+	bookmarksopen=true,
+	bookmarksnumbered=true,
+	breaklinks=true,
+	linktocpage=true,
+	urlcolor=BaseColor,
+	citecolor=BaseColor,
+	linkcolor=BaseColor
+}
+
+% ================================================
+% The main document
+% ------------------------------------------------
+\begin{document}
+
+% Title page
+\begin{frame}[t,titleimage]{-}
+\titlepage%
+\vspace*{-1cm}
+\begin{beamercolorbox}[sep=8pt,center]{subtitle}
+	\usebeamerfont{subtitle}
+	\textbf{Meeting 2: System Architect Presentation}\\
+	Seminarraum 1, N74 • May 28, 14:00–18:00
+\end{beamercolorbox}
+\end{frame}
+
+% Agenda/Table of Contents
+\begin{frame}[title]{-}             
+\tableofcontents
+\end{frame}
+
+% ================================================
+% Include all sections
+% ================================================
+\input{sections/03_Problem}
+\input{sections/04_Solution_Approach}
+\input{sections/05_Phase1}
+\input{sections/06_Phase2}
+\input{sections/07_Design_Decisions}
+\input{sections/08_Results}
+\input{sections/09_Challenges}
+
+\end{document}

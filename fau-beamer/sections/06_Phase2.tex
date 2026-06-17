@@ -1,0 +1,80 @@
+\section[Candidates \& Interference]{Phase 2: Candidates \& Interference}
+
+\begin{frame}[t]{Candidate Generation}{}
+    \textbf{Every city and cluster centroid becomes a possible tower location.}
+
+    \vspace{0.2cm}
+    \begin{columns}[T]
+        \column{0.5\textwidth}
+        \begin{block}{Candidate Sources}
+            \begin{enumerate}
+                \item Cluster centroids
+                \item Every clustered city
+                \item Every noise (isolated) city
+            \end{enumerate}
+        \end{block}
+
+        \column{0.5\textwidth}
+        \begin{block}{Tower Types Generated}
+            At each location, we add a tower option using:
+            \begin{itemize}
+                \item \alert{Dense radius} ($r_{\text{dense}}$)
+                \item \alert{Sparse radius} ($r_{\text{sparse}}$)
+            \end{itemize}
+            {\footnotesize (If the radii are equal, only one type is needed.)}
+        \end{block}
+    \end{columns}
+
+    \vspace{0.2cm}
+    \begin{center}
+        \small
+        $|J| = (\text{\# centroids} + \text{\# clustered cities} + \text{\# noise}) \;\times\; (1\text{--}2 \text{ tower types})$
+    \end{center}
+
+    \vspace{0.1cm}
+    \begin{alertblock}{Why so many candidates?}
+        The MILP solver decides \emph{which} candidates to activate. Over-generating candidates gives the solver flexibility; the optimization itself enforces sparsity through the cost objective.
+    \end{alertblock}
+\end{frame}
+
+\begin{frame}[t]{Interference Modeling}{}
+    \begin{columns}[T]
+        \column{0.45\textwidth}
+        \begin{block}{When Do Towers Interfere?}
+            Two towers interfere if their coverage circles overlap:
+            \begin{center}
+                \begin{tikzpicture}[scale=0.9]
+                    \fill[FAURed!25] (0,0) circle (1.2);
+                    \fill[FAUBlue!25] (1.6,0) circle (1.2);
+                    \fill[FAUOrange!40] (0.8,0) circle (0.55);
+                    \draw[FAURed, thick] (0,0) circle (1.2);
+                    \draw[FAUBlue, thick] (1.6,0) circle (1.2);
+                    \node at (0.8,-0.9) {\footnotesize overlap};
+                \end{tikzpicture}
+            \end{center}
+        \end{block}
+
+        \column{0.55\textwidth}
+        \begin{block}{Normalized Overlap Penalty}
+            \begin{equation*}
+                P_{pq} = \begin{cases}
+                    \dfrac{R_{\text{sum}} - d}{R_{\text{sum}}}
+                        & \text{if } d < R_{\text{sum}} \\[10pt]
+                    0   & \text{otherwise}
+                \end{cases}
+            \end{equation*}
+            \vspace{-0.2cm}
+            {\small
+            $R_{\text{sum}} = r_p + r_q$\\
+            $d$ = haversine distance between towers
+            }
+        \end{block}
+    \end{columns}
+
+    \vspace{0.2cm}
+    \begin{center}
+        \small
+        Pairs are pre-filtered using a \textbf{KD-tree} with query radius $2 \times r_{\max}$ \\
+        $\rightarrow$ only pairs that can physically overlap are passed to the solver
+    \end{center}
+\end{frame}

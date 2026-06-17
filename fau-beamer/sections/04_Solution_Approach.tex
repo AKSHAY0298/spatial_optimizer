@@ -1,0 +1,49 @@
+\section{System Architecture}
+
+\begin{frame}[t]{Two-Phase Pipeline}{}
+    \begin{center}
+        \begin{tikzpicture}[
+            phasebox/.style={
+                draw, rounded corners, text width=8cm, align=left,
+                minimum height=3.2cm, inner sep=12pt, font=\small
+            },
+            arrow/.style={->, >=stealth, thick, FAUBlue},
+            tag/.style={font=\footnotesize\sffamily\bfseries, FAUBlue}
+        ]
+            % Phase 1 Node
+            \node[phasebox, fill=FAUGreen!18] (p1) {
+                \centering\textbf{Phase 1: Preprocessing}\\[10pt]
+                \raggedright
+                {\footnotesize 1.\ Spatial Clustering \hfill \textit{(DBSCAN)}}\\[4pt]
+                {\footnotesize 2.\ Radius Search \hfill \textit{(coarse-to-fine)}}\\[4pt]
+                {\footnotesize 3.\ Candidate Generation \hfill \textit{(set $J$)}}
+            };
+
+            % Phase 2 Node - Increased from 1.6cm to 2.8cm to lengthen the arrow
+            \node[phasebox, fill=FAUBlue!15, right=2.8cm of p1] (p2) {
+                \centering\textbf{Phase 2: Optimization}\\[10pt]
+                \raggedright
+                {\footnotesize $\bullet$ MILP with discrete variables}\\[4pt]
+                {\footnotesize $\bullet$ $\alpha$: cost vs.\ interference}\\[4pt]
+                {\footnotesize $\bullet$ $\beta$: coverage incentive}
+            };
+
+            % Connection Arrow - Automatically lengthens based on the node distance
+            \draw[arrow] (p1.east) -- node[above=2pt, tag] {fixed radii} (p2.west);
+
+            % Output label - Centered relative to Phase 2 box
+            \node[font=\small\sffamily\bfseries, below=0.4cm of p2, FAUBlue] (out) {
+                $\Rightarrow$ Selected towers, coverage map, cost breakdown
+            };
+        \end{tikzpicture}
+    \end{center}
+
+    \vspace{0.15cm}
+\begin{center}
+    \begin{minipage}{0.95\textwidth} % adjust width here
+        \begin{block}{Key Insight}
+            By pre-computing the two radii in Phase~1, the MILP in Phase~2 uses only \alert{binary and continuous} variables — no non-linear terms.
+        \end{block}
+    \end{minipage}
+    \end{center}
+\end{frame}
