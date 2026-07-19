@@ -13,12 +13,17 @@ from .spatial import cluster_centroids, pairwise_haversine_km, EARTH_RADIUS_KM
 
 @dataclass(frozen=True)
 class RadiusPlan:
-    dense_radius_km: int
-    sparse_radius_km: int
+    dense_radius_km: float
+    sparse_radius_km: float
     dense_score: float
     sparse_score: float
     dense_bounds_km: tuple[int, int]
     sparse_bounds_km: tuple[int, int]
+    search_method: str = "dbscan_representative"
+    pair_objective: float | None = None
+    proxy_objective: float | None = None
+    evaluated_radius_pairs: int = 0
+    solved_radius_pairs: int = 0
 
 
 def _integer_bounds(points: np.ndarray) -> tuple[int, int]:
