@@ -34,8 +34,17 @@ def solve(
     require_all_tower_types: bool = True,
     mutually_exclusive_locations: bool = True,
     time_limit: float | None = 60.0,
+    relaxed: bool = False,
 ) -> OptimizationResult:
-    """Solve the linear tower placement model using PuLP."""
+    """Solve the linear tower placement model using PuLP.
+
+    Parameters
+    ----------
+    relaxed : bool
+        If True, relax binary tower-selection variables to continuous [0, 1].
+        This converts the MILP into an LP that solves much faster and provides
+        a valid lower bound on the MILP objective.
+    """
 
     if not 0.0 <= alpha <= 1.0:
         raise ValueError("alpha must be within the closed interval [0, 1].")
@@ -44,9 +53,15 @@ def solve(
     pair_count = len(interference_pairs)
     city_count = int(coverage_matrix.shape[1])
 
-    model = pulp.LpProblem("Tower_Placement", pulp.LpMinimize)
+    model = pulp.LpProblem(
+        "Tower_Placement" if not relaxed else "Tower_Placement_LP_Relaxation",
+        pulp.LpMinimize,
+    )
 
-    x = [pulp.LpVariable(f"x_{i}", cat=pulp.LpBinary) for i in range(candidate_count)]
+    if relaxed:
+        x = [pulp.LpVariable(f"x_{i}", lowBound=0.0, upBound=1.0, cat=pulp.LpContinuous) for i in range(candidate_count)]
+    else:
+        x = [pulp.LpVariable(f"x_{i}", cat=pulp.LpBinary) for i in range(candidate_count)]
     y = [pulp.LpVariable(f"y_{p}", cat=pulp.LpContinuous, lowBound=0.0, upBound=1.0) for p in range(pair_count)]
     z = [] if hard_coverage else [pulp.LpVariable(f"z_{j}", cat=pulp.LpBinary) for j in range(city_count)]
 

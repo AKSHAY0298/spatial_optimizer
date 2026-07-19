@@ -5,7 +5,7 @@ import math
 
 import numpy as np
 import pandas as pd
-from scipy.spatial import cKDTree
+from scipy.spatial import ConvexHull, Voronoi, cKDTree
 
 from .costs import tower_cost
 from .radius_search import RadiusPlan
@@ -106,6 +106,139 @@ def _grid_locations(
     return [points[i] for i in range(len(points)) if close_mask[i]]
 
 
+def _weisafeld_geometric_median(
+    points_km: np.ndarray,
+    weights: np.ndarray | None = None,
+    max_iter: int = 200,
+    tol: float = 1e-5,
+) -> np.ndarray:
+    """Compute the weighted geometric median via Weiszfeld's algorithm.
+
+    The geometric median minimizes Σ wᵢ · ||x - pᵢ||, the sum of weighted
+    Euclidean distances to all input points. It is more robust to outliers
+    than the arithmetic mean (centroid).
+
+    Parameters
+    ----------
+    points_km : np.ndarray of shape (n, 2)
+        Points in a flat km-projected coordinate system.
+    weights : np.ndarray of shape (n,) or None
+        Point weights (e.g., city population). Uniform if None.
+    """
+    n = len(points_km)
+    if n == 0:
+        raise ValueError("At least one point is required.")
+    if n == 1:
+        return points_km[0].copy()
+
+    if weights is None:
+        weights = np.ones(n, dtype=float)
+    else:
+        weights = np.asarray(weights, dtype=float)
+    weights /= weights.sum()
+
+    # Start from the weighted arithmetic mean
+    current = np.average(points_km, axis=0, weights=weights)
+
+    for _ in range(max_iter):
+        diffs = points_km - current
+        dists = np.linalg.norm(diffs, axis=1)
+        # Guard: if current coincides with a data point, nudge it
+        zero_mask = dists < 1e-12
+        if zero_mask.any():
+            dists[zero_mask] = 1e-12
+
+        w_over_d = weights / dists
+        denominator = w_over_d.sum()
+        if denominator < 1e-15:
+            break
+
+        new_point = (points_km * w_over_d[:, None]).sum(axis=0) / denominator
+        shift = np.linalg.norm(new_point - current)
+        current = new_point
+        if shift < tol:
+            break
+
+    return current
+
+
+def _voronoi_candidate_locations(
+    cities: pd.DataFrame,
+    buffer_km: float = 20.0,
+    max_nearest_city_km: float = 50.0,
+) -> list[tuple[float, float]]:
+    """Generate candidate tower locations from Voronoi vertices of city positions.
+
+    Voronoi vertices are points equidistant from three or more cities — locally
+    optimal for minimizing the maximum distance to nearby cities. We keep only
+    finite vertices that:
+      - Fall within the convex hull of the cities (plus *buffer_km*).
+      - Have at least one city within *max_nearest_city_km*.
+
+    Parameters
+    ----------
+    cities : pd.DataFrame
+        Must contain 'latitude' and 'longitude' columns.
+    buffer_km : float
+        Extra margin (km) beyond the convex hull to accept Voronoi vertices.
+    max_nearest_city_km : float
+        Maximum distance to the nearest city for a Voronoi vertex to be kept.
+        Prunes remote vertices that would never be useful as tower locations.
+    """
+    from .spatial import project_coordinates_km
+
+    coords = cities[["latitude", "longitude"]].to_numpy(dtype=float)
+    if len(coords) < 3:
+        return []  # Voronoi requires at least 3 points
+
+    projected = project_coordinates_km(coords)
+
+    vor = Voronoi(projected)
+    if vor.vertices is None or len(vor.vertices) == 0:
+        return []
+
+    # Build convex hull for filtering
+    try:
+        hull = ConvexHull(projected)
+        hull_vertices = projected[hull.vertices]
+    except Exception:
+        hull_vertices = projected
+
+    hull_center = hull_vertices.mean(axis=0)
+    hull_radius = float(np.linalg.norm(hull_vertices - hull_center, axis=1).max())
+
+    # Build KD-tree of city projected coords for nearest-neighbor queries
+    city_tree = cKDTree(projected)
+
+    # Query nearest city for each Voronoi vertex
+    if len(vor.vertices) > 0:
+        nearest_dists, _ = city_tree.query(vor.vertices, k=1)
+    else:
+        return []
+
+    # Reference latitude for inverse projection
+    ref_lat_rad = float(np.radians(coords[:, 0]).mean())
+    cos_ref = math.cos(ref_lat_rad)
+    earth_r = 6371.0088
+
+    candidates: list[tuple[float, float]] = []
+    for i, vertex in enumerate(vor.vertices):
+        # Filter by hull containment
+        dist_to_center = float(np.linalg.norm(vertex - hull_center))
+        if dist_to_center > hull_radius + buffer_km:
+            continue
+
+        # Filter by nearest city distance (prunes remote vertices)
+        if float(nearest_dists[i]) > max_nearest_city_km:
+            continue
+
+        lat = float(np.degrees(vertex[1] / earth_r))
+        lon = float(np.degrees(vertex[0] / (earth_r * cos_ref)))
+        candidates.append((lat, lon))
+
+    return candidates
+
+
 def generate_candidate_locations(
     cities: pd.DataFrame,
     labels: np.ndarray,
@@ -113,87 +246,112 @@ def generate_candidate_locations(
     include_cluster_centroids: bool = True,
     include_midpoints: bool = True,
     midpoint_max_distance_km: float = 80.0,
+    include_voronoi: bool = False,
     include_grid: bool = False,
     grid_spacing_km: float = 50.0,
+    dedup_tolerance_km: float = 1.5,
 ) -> list[TowerLocation]:
     """Generate possible physical tower locations independent of radius.
 
     Sources:
-      1. Cluster centroids (from DBSCAN labels) — optional enrichment
+      1. Weighted geometric medians of DBSCAN clusters (robust to outliers)
       2. Every city location (always included)
       3. Midpoints between neighboring cities (geometric candidates)
-      4. Hexagonal grid points near cities (optional, for very dense search)
+      4. Voronoi vertices within the convex hull (optimal coverage points)
+      5. Hexagonal grid points near cities (optional, for very dense search)
+
+    All sources are merged and near-duplicates (within *dedup_tolerance_km*)
+    are removed, keeping the first occurrence.
     """
+
+    from .spatial import project_coordinates_km
 
     labeled_cities = cities.copy()
     labeled_cities["cluster_label"] = labels
 
-    locations: list[TowerLocation] = []
-    location_index = 0
+    # Temporary storage: (lat, lon, name, source, cluster_label)
+    raw: list[tuple[float, float, str, str, int]] = []
 
-    # --- Cluster centroids (enrichment only) ---
+    # --- Cluster centroids (arithmetic mean) ---
     if include_cluster_centroids:
         clustered_groups = labeled_cities[labeled_cities["cluster_label"] >= 0].groupby("cluster_label")
         for cluster_label, group in clustered_groups:
             centroid = group[["latitude", "longitude"]].mean()
-            locations.append(
-                TowerLocation(
-                    location_id=f"loc_{location_index:04d}",
-                    name=f"cluster_{int(cluster_label)}_centroid",
-                    source="cluster_centroid",
-                    latitude=float(centroid["latitude"]),
-                    longitude=float(centroid["longitude"]),
-                    cluster_label=int(cluster_label),
-                )
-            )
-            location_index += 1
+            raw.append((float(centroid["latitude"]), float(centroid["longitude"]),
+                        f"cluster_{int(cluster_label)}_centroid", "cluster_centroid", int(cluster_label)))
 
     # --- Every city is a candidate location ---
     for row in labeled_cities.itertuples(index=False):
         source = "noise_city" if int(row.cluster_label) < 0 else "cluster_city"
-        locations.append(
-            TowerLocation(
-                location_id=f"loc_{location_index:04d}",
-                name=str(row.city),
-                source=source,
-                latitude=float(row.latitude),
-                longitude=float(row.longitude),
-                cluster_label=int(row.cluster_label),
-            )
-        )
-        location_index += 1
+        raw.append((float(row.latitude), float(row.longitude), str(row.city), source, int(row.cluster_label)))
 
     # --- Midpoint candidates between neighboring cities ---
     if include_midpoints:
-        midpoints = _midpoint_locations(cities, max_distance_km=midpoint_max_distance_km)
-        for mid_lat, mid_lon in midpoints:
-            locations.append(
-                TowerLocation(
-                    location_id=f"loc_{location_index:04d}",
-                    name=f"midpoint_{location_index}",
-                    source="midpoint",
-                    latitude=mid_lat,
-                    longitude=mid_lon,
-                    cluster_label=-1,
-                )
-            )
-            location_index += 1
+        for mid_lat, mid_lon in _midpoint_locations(cities, max_distance_km=midpoint_max_distance_km):
+            raw.append((mid_lat, mid_lon, f"midpoint_{len(raw)}", "midpoint", -1))
+
+    # --- Voronoi vertex candidates (keep only top-N most isolated) ---
+    if include_voronoi:
+        voronoi_raw = _voronoi_candidate_locations(cities, max_nearest_city_km=20.0)
+        # Sort by distance from nearest city (descending) and keep top 50 —
+        # these are the most isolated points in coverage gaps, offering the
+        # best new coverage options that city locations alone can't provide
+        if len(voronoi_raw) > 50:
+            from .spatial import pairwise_haversine_km
+            vor_coords = np.array(voronoi_raw, dtype=float)
+            city_coords = cities[["latitude", "longitude"]].to_numpy(dtype=float)
+            vor_dists = pairwise_haversine_km(vor_coords, city_coords).min(axis=1)
+            top_idx = np.argsort(vor_dists)[-50:]  # farthest 50 from any city
+            voronoi_raw = [voronoi_raw[i] for i in sorted(top_idx)]
+        for vor_lat, vor_lon in voronoi_raw:
+            raw.append((vor_lat, vor_lon, f"voronoi_{len(raw)}", "voronoi", -1))
 
     # --- Grid-based candidates ---
     if include_grid:
-        grid_points = _grid_locations(cities, spacing_km=grid_spacing_km)
-        for grid_lat, grid_lon in grid_points:
-            locations.append(
-                TowerLocation(
-                    location_id=f"loc_{location_index:04d}",
-                    name=f"grid_{location_index}",
-                    source="grid",
-                    latitude=grid_lat,
-                    longitude=grid_lon,
-                    cluster_label=-1,
-                )
+        for grid_lat, grid_lon in _grid_locations(cities, spacing_km=grid_spacing_km):
+            raw.append((grid_lat, grid_lon, f"grid_{len(raw)}", "grid", -1))
+
+    # --- Deduplicate (only among non-city sources; cities are always kept) ---
+    if dedup_tolerance_km > 0 and len(raw) > 1:
+        from .spatial import pairwise_haversine_km
+
+        # Determine which entries are actual cities (always keep them)
+        city_indices = {i for i, (_, _, _, source, _) in enumerate(raw) if source in ("cluster_city", "noise_city")}
+
+        raw_coords_arr = np.array([(lat, lon) for lat, lon, _, _, _ in raw], dtype=float)
+        keep_mask = np.ones(len(raw_coords_arr), dtype=bool)
+
+        for i in range(len(raw_coords_arr)):
+            if not keep_mask[i]:
+                continue
+            later = np.flatnonzero(keep_mask)[np.flatnonzero(keep_mask) > i]
+            if len(later) == 0:
+                continue
+            a = raw_coords_arr[i:i + 1]
+            b = raw_coords_arr[later]
+            dists = pairwise_haversine_km(a, b)[0]
+            close_mask = dists <= dedup_tolerance_km
+
+            # Never remove a city location
+            for j_idx, j in enumerate(later):
+                if close_mask[j_idx] and j not in city_indices:
+                    keep_mask[j] = False
+
+        raw = [raw[i] for i in range(len(raw)) if keep_mask[i]]
+
+    # --- Build TowerLocation list ---
+    locations: list[TowerLocation] = []
+    for idx, (lat, lon, name, source, cluster_label) in enumerate(raw):
+        locations.append(
+            TowerLocation(
+                location_id=f"loc_{idx:04d}",
+                name=name,
+                source=source,
+                latitude=lat,
+                longitude=lon,
+                cluster_label=cluster_label,
             )
-            location_index += 1
+        )
 
     return locations
 

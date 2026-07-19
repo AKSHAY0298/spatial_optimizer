@@ -272,7 +272,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--radius-step",
         type=float,
-        default=1.0,
+        default=5.0,
         help="Step size for candidate radii (1.0=integers, 0.5=half-km resolution)",
     )
     parser.add_argument(
@@ -283,6 +283,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--time-limit", type=float, default=60.0, help="MILP solver time limit in seconds")
     parser.add_argument("--no-midpoints", action="store_true", help="Disable midpoint candidate locations")
+    parser.add_argument("--voronoi", action="store_true", help="Enable Voronoi vertex candidate locations (experimental)")
     parser.add_argument(
         "--midpoint-max-distance",
         type=float,
@@ -291,7 +292,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--grid", action="store_true", help="Enable hexagonal grid candidate locations")
     parser.add_argument("--grid-spacing", type=float, default=50.0, help="Grid spacing in km")
-    parser.add_argument("--no-refine", action="store_true", help="Skip post-MILP radius refinement")
+    parser.add_argument("--refine", action="store_true", help="Enable per-tower radius refinement (WARNING: produces more than 2 radii)")
     parser.add_argument("--output", type=str, default=None, help="Path to output .txt file (one line per tower: latitude, longitude, radius)")
     parser.add_argument("--plot-output", type=str, default=None, help="Path to save the visualization image, for example images/final_topology.png")
     parser.add_argument("--no-plot", action="store_true", help="Skip the map visualisation")
@@ -316,9 +317,10 @@ def main() -> None:
         time_limit=args.time_limit,
         include_midpoints=not args.no_midpoints,
         midpoint_max_distance_km=args.midpoint_max_distance,
+        include_voronoi=args.voronoi,
         include_grid=args.grid,
         grid_spacing_km=args.grid_spacing,
-        refine_radii=not args.no_refine,
+        refine_radii=args.refine,
     )
 
     print(f"Cities loaded: {len(result.cities)}")
@@ -361,11 +363,16 @@ def main() -> None:
     if result.radius_pair_evaluations:
         solved = [item for item in result.radius_pair_evaluations if item.solver_status is not None]
         solved = sorted(solved, key=lambda item: float("inf") if item.milp_objective is None else item.milp_objective)
-        print("\nBEST RADIUS PAIRS TESTED:")
+        print("\nBEST RADIUS PAIRS TESTED (LP relaxation → MILP):")
         for item in solved[:5]:
+            lp_str = f"LP={item.lp_objective:.4f}" if item.lp_objective is not None else "LP=N/A"
+            gap_str = ""
+            if item.lp_objective is not None and item.milp_objective is not None and item.lp_objective > 0:
+                gap = (item.milp_objective - item.lp_objective) / item.lp_objective * 100
+                gap_str = f" | gap={gap:.1f}%"
             print(
                 f"- ({item.dense_radius_km}, {item.sparse_radius_km}) km | "
-                f"objective={item.milp_objective:.4f} | towers={item.selected_tower_count} | "
+                f"{lp_str} → MILP={item.milp_objective:.4f}{gap_str} | towers={item.selected_tower_count} | "
                 f"cost={item.total_cost:.4f} | interference={item.total_interference:.4f} | "
                 f"status={item.solver_status}"
             )

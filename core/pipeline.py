@@ -38,14 +38,16 @@ def run(
     beta: float = 0.5,
     radius_mode: str = "milp_pair_search",
     radius_milp_top_k: int = 8,
-    radius_step: float = 1.0,
+    radius_step: float = 5.0,
     radius_time_limit: float | None = 20.0,
     time_limit: float | None = 60.0,
     include_midpoints: bool = True,
     midpoint_max_distance_km: float = 80.0,
+    include_voronoi: bool = False,
     include_grid: bool = False,
     grid_spacing_km: float = 50.0,
-    refine_radii: bool = True,
+    refine_radii: bool = False,
+    refine_radii_grid: bool = True,
 ) -> Result:
     """Execute the full two-phase pipeline from data loading to optimization."""
 
@@ -64,9 +66,11 @@ def run(
             time_limit_per_pair=radius_time_limit,
             include_midpoints=include_midpoints,
             midpoint_max_distance_km=midpoint_max_distance_km,
+            include_voronoi=include_voronoi,
             include_grid=include_grid,
             grid_spacing_km=grid_spacing_km,
             refine_radii=refine_radii,
+            refine_radii_grid=refine_radii_grid,
         )
         radius_plan = radius_search.radius_plan
         candidates = radius_search.candidates

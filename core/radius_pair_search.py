@@ -12,7 +12,7 @@ from .candidates import (
     generate_candidate_locations,
     generate_candidates_from_locations,
 )
-from .costs import tower_cost
+from .costs import cost_critical_radii, tower_cost
 from .matrices import (
     build_coverage_matrix,
     build_interference_pairs,
@@ -31,6 +31,7 @@ class RadiusPairEvaluation:
     proxy_cost: float
     proxy_interference: float
     proxy_tower_count: int
+    lp_objective: float | None = None
     milp_objective: float | None = None
     total_cost: float | None = None
     total_interference: float | None = None
@@ -140,12 +141,8 @@ def _greedy_proxy_evaluation(
             if not available[location_index]:
                 continue
             loc = locations[location_index]
-            loc_point = np.array([loc.latitude, loc.longitude], dtype=float)
-            # Vectorized distance to all selected
-            dists = np.sqrt(
-                ((loc_point[0] - selected_coords[:, 0]) * 110.574) ** 2
-                + ((loc_point[1] - selected_coords[:, 1]) * 111.320 * math.cos(math.radians(loc_point[0]))) ** 2
-            )
+            loc_point = np.array([[loc.latitude, loc.longitude]], dtype=float)
+            dists = pairwise_haversine_km(loc_point, selected_coords)[0]
             added = 0.0
             for i, d in enumerate(dists):
                 r_sum = radii_km[missing_type] + radii_km[selected_type_list[i]]
@@ -164,7 +161,7 @@ def _greedy_proxy_evaluation(
 
     total_cost = float(sum(costs[type_index] for type_index, _ in selected))
 
-    # Quick interference estimate using approximate distances
+    # Quick interference estimate using haversine distances
     total_interference = 0.0
     sel_coords = np.array(
         [[locations[loc_idx].latitude, locations[loc_idx].longitude] for _, loc_idx in selected],
@@ -172,13 +169,10 @@ def _greedy_proxy_evaluation(
     )
     sel_types = [t for t, _ in selected]
     n_sel = len(selected)
+    dist_matrix = pairwise_haversine_km(sel_coords)
     for i in range(n_sel):
         for j in range(i + 1, n_sel):
-            dlat = (sel_coords[i, 0] - sel_coords[j, 0]) * 110.574
-            dlon = (sel_coords[i, 1] - sel_coords[j, 1]) * 111.320 * math.cos(
-                math.radians((sel_coords[i, 0] + sel_coords[j, 0]) / 2.0)
-            )
-            d = math.sqrt(dlat * dlat + dlon * dlon)
+            d = dist_matrix[i, j]
             r_sum = radii_km[sel_types[i]] + radii_km[sel_types[j]]
             if d < r_sum:
                 total_interference += (r_sum - d) / r_sum
@@ -198,54 +192,23 @@ def _filter_uncovering_candidates(
     return filtered_candidates, coverage_matrix[keep_mask]
 
 
-def _solve_radius_pair(
-    locations: list[TowerLocation],
-    cities: pd.DataFrame,
-    radii_km: tuple[float, float],
-    *,
-    alpha: float,
-    time_limit: float | None,
-) -> tuple[
-    list[TowerCandidate],
-    np.ndarray,
-    list[tuple[int, int]],
-    np.ndarray,
-    OptimizationResult,
-]:
-    candidates = generate_candidates_from_locations(locations, radii_km)
-    coverage_matrix = build_coverage_matrix(cities, candidates)
-    candidates, coverage_matrix = _filter_uncovering_candidates(candidates, coverage_matrix)
-    interference_pairs, interference_penalties = build_interference_pairs(candidates)
-    optimization = solve(
-        candidates,
-        coverage_matrix,
-        interference_pairs,
-        interference_penalties,
-        alpha=alpha,
-        beta=0.0,
-        hard_coverage=True,
-        require_all_tower_types=True,
-        mutually_exclusive_locations=True,
-        time_limit=time_limit,
-    )
-    return candidates, coverage_matrix, interference_pairs, interference_penalties, optimization
-
-
 def optimize_radius_pair_with_milp(
     cities: pd.DataFrame,
     labels: np.ndarray,
     *,
     alpha: float = 0.5,
     candidate_radii: list[float] | None = None,
-    radius_step: float = 1.0,
+    radius_step: float = 5.0,
     milp_top_k: int = 8,
     time_limit_per_pair: float | None = 20.0,
     include_cluster_centroids: bool = True,
     include_midpoints: bool = True,
     midpoint_max_distance_km: float = 80.0,
+    include_voronoi: bool = False,
     include_grid: bool = False,
     grid_spacing_km: float = 50.0,
     refine_radii: bool = True,
+    refine_radii_grid: bool = True,
 ) -> RadiusPairSearchResult:
     """Choose the two radii by ranking all candidate pairs and solving top MILPs.
 
@@ -263,6 +226,9 @@ def optimize_radius_pair_with_milp(
     refine_radii : bool
         After MILP solve, shrink each tower's radius to the minimum needed to
         maintain coverage, reducing cost without losing coverage.
+    refine_radii_grid : bool
+        After the coarse radius-step pass, spawn a fine 0.5 km micro-grid around
+        the winning radii (2 km window) and re-evaluate for higher precision.
     """
 
     if not 0.0 <= alpha <= 1.0:
@@ -273,12 +239,17 @@ def optimize_radius_pair_with_milp(
     if candidate_radii is not None:
         radii = candidate_radii
     else:
-        # Generate candidate radii at given step size
-        radii = []
+        # Generate candidate radii at given step size, plus cost-critical points
+        radii_set: set[float] = set()
         r = 5.0
         while r <= 100.0:
-            radii.append(round(r, 1))
+            radii_set.add(round(r, 1))
             r += radius_step
+        # Inject cost-critical radii (segment boundaries, inflection points)
+        for crit_r in cost_critical_radii():
+            if 5.0 <= crit_r <= 100.0:
+                radii_set.add(round(crit_r, 1))
+        radii = sorted(radii_set)
 
     pairs = _radius_pairs(radii)
     if not pairs:
@@ -290,6 +261,7 @@ def optimize_radius_pair_with_milp(
         include_cluster_centroids=include_cluster_centroids,
         include_midpoints=include_midpoints,
         midpoint_max_distance_km=midpoint_max_distance_km,
+        include_voronoi=include_voronoi,
         include_grid=include_grid,
         grid_spacing_km=grid_spacing_km,
     )
@@ -328,13 +300,43 @@ def optimize_radius_pair_with_milp(
 
     for proxy_eval in pairs_to_solve:
         radii_km = (proxy_eval.dense_radius_km, proxy_eval.sparse_radius_km)
-        candidates, coverage_matrix, interference_pairs, interference_penalties, optimization = _solve_radius_pair(
-            locations,
-            cities,
-            radii_km,
+
+        # Build shared problem data once for both LP and MILP
+        candidates = generate_candidates_from_locations(locations, radii_km)
+        coverage_matrix = build_coverage_matrix(cities, candidates)
+        candidates, coverage_matrix = _filter_uncovering_candidates(candidates, coverage_matrix)
+        interference_pairs, interference_penalties = build_interference_pairs(candidates)
+
+        # LP relaxation — fast lower bound on the MILP objective
+        lp_result = solve(
+            candidates,
+            coverage_matrix,
+            interference_pairs,
+            interference_penalties,
             alpha=alpha,
+            beta=0.0,
+            hard_coverage=True,
+            require_all_tower_types=True,
+            mutually_exclusive_locations=True,
             time_limit=time_limit_per_pair,
+            relaxed=True,
         )
+
+        # Full MILP solve
+        optimization = solve(
+            candidates,
+            coverage_matrix,
+            interference_pairs,
+            interference_penalties,
+            alpha=alpha,
+            beta=0.0,
+            hard_coverage=True,
+            require_all_tower_types=True,
+            mutually_exclusive_locations=True,
+            time_limit=time_limit_per_pair,
+            relaxed=False,
+        )
+
         solved_eval = RadiusPairEvaluation(
             dense_radius_km=proxy_eval.dense_radius_km,
             sparse_radius_km=proxy_eval.sparse_radius_km,
@@ -342,6 +344,7 @@ def optimize_radius_pair_with_milp(
             proxy_cost=proxy_eval.proxy_cost,
             proxy_interference=proxy_eval.proxy_interference,
             proxy_tower_count=proxy_eval.proxy_tower_count,
+            lp_objective=lp_result.objective_value,
             milp_objective=optimization.objective_value,
             total_cost=optimization.total_cost,
             total_interference=optimization.total_interference,
@@ -351,7 +354,9 @@ def optimize_radius_pair_with_milp(
         )
         solved_evaluations.append(solved_eval)
 
-        if optimization.message != "Optimal":
+        # Accept any solution that produced usable results (CBC may return
+        # "Not Solved" when it finds a feasible solution but hits time limit)
+        if optimization.selected_indices.size == 0:
             continue
         if best_evaluation is None or optimization.objective_value < float(best_evaluation.milp_objective):
             best_evaluation = solved_eval
@@ -367,6 +372,101 @@ def optimize_radius_pair_with_milp(
         raise RuntimeError("No optimal MILP solution was found for the tested radius pairs.")
 
     candidates, coverage_matrix, interference_pairs, interference_penalties, optimization = best_payload
+
+    # --- Adaptive grid refinement: fine grid around coarse winners ---
+    if refine_radii_grid and best_evaluation is not None:
+        fine_radius_set: set[float] = set()
+
+        def _fine_grid_around(center: float, window: float = 2.0, step: float = 0.5) -> list[float]:
+            """Generate fine-grained radii around a center value."""
+            fine: list[float] = []
+            r = max(5.0, center - window)
+            while r <= min(100.0, center + window):
+                fine.append(round(r, 1))
+                r += step
+            return fine
+
+        # Build fine candidate pool around the winning radii
+        fine_dense = _fine_grid_around(best_evaluation.dense_radius_km)
+        fine_sparse = _fine_grid_around(best_evaluation.sparse_radius_km)
+        fine_radius_set.update(fine_dense)
+        fine_radius_set.update(fine_sparse)
+
+        # Also inject cost-critical radii in the neighborhood
+        for crit_r in cost_critical_radii():
+            if 5.0 <= crit_r <= 100.0:
+                if abs(crit_r - best_evaluation.dense_radius_km) <= 3.0 or abs(crit_r - best_evaluation.sparse_radius_km) <= 3.0:
+                    fine_radius_set.add(round(crit_r, 1))
+
+        fine_radii = sorted(fine_radius_set)
+        fine_pairs = _radius_pairs(fine_radii)
+
+        if fine_pairs:
+            # Proxy-rank all fine pairs
+            fine_proxy: list[RadiusPairEvaluation] = []
+            for radius_a, radius_b in fine_pairs:
+                obj, cost, interf, cnt = _greedy_proxy_evaluation(
+                    locations, distances_km, (radius_a, radius_b), alpha=alpha,
+                )
+                fine_proxy.append(RadiusPairEvaluation(
+                    dense_radius_km=radius_a, sparse_radius_km=radius_b,
+                    proxy_objective=obj, proxy_cost=cost,
+                    proxy_interference=interf, proxy_tower_count=cnt,
+                ))
+
+            fine_ranked = sorted(fine_proxy, key=lambda item: item.proxy_objective)
+            fine_top_k = min(milp_top_k, len(fine_ranked))
+            fine_best_eval: RadiusPairEvaluation | None = None
+            fine_best_payload = None
+
+            for fine_eval in fine_ranked[:fine_top_k]:
+                r_pair = (fine_eval.dense_radius_km, fine_eval.sparse_radius_km)
+                fc = generate_candidates_from_locations(locations, r_pair)
+                fcov = build_coverage_matrix(cities, fc)
+                fc, fcov = _filter_uncovering_candidates(fc, fcov)
+                fint_pairs, fint_penalties = build_interference_pairs(fc)
+
+                # LP relaxation
+                lp_r = solve(fc, fcov, fint_pairs, fint_penalties, alpha=alpha,
+                             beta=0.0, hard_coverage=True, require_all_tower_types=True,
+                             mutually_exclusive_locations=True, time_limit=time_limit_per_pair,
+                             relaxed=True)
+
+                # MILP
+                milp_r = solve(fc, fcov, fint_pairs, fint_penalties, alpha=alpha,
+                               beta=0.0, hard_coverage=True, require_all_tower_types=True,
+                               mutually_exclusive_locations=True, time_limit=time_limit_per_pair,
+                               relaxed=False)
+
+                fe = RadiusPairEvaluation(
+                    dense_radius_km=fine_eval.dense_radius_km,
+                    sparse_radius_km=fine_eval.sparse_radius_km,
+                    proxy_objective=fine_eval.proxy_objective,
+                    proxy_cost=fine_eval.proxy_cost,
+                    proxy_interference=fine_eval.proxy_interference,
+                    proxy_tower_count=fine_eval.proxy_tower_count,
+                    lp_objective=lp_r.objective_value,
+                    milp_objective=milp_r.objective_value,
+                    total_cost=milp_r.total_cost,
+                    total_interference=milp_r.total_interference,
+                    selected_tower_count=len(milp_r.selected_candidates),
+                    coverage_ratio=milp_r.coverage_ratio,
+                    solver_status=milp_r.message,
+                )
+                solved_evaluations.append(fe)
+
+                if milp_r.selected_indices.size == 0:
+                    continue
+                if fine_best_eval is None or milp_r.objective_value < float(fine_best_eval.milp_objective):
+                    fine_best_eval = fe
+                    fine_best_payload = (fc, fcov, fint_pairs, fint_penalties, milp_r)
+
+            # If fine-grid found a better solution, use it
+            if fine_best_eval is not None and fine_best_payload is not None:
+                if float(fine_best_eval.milp_objective) < float(best_evaluation.milp_objective):
+                    best_evaluation = fine_best_eval
+                    best_payload = fine_best_payload
+                    candidates, coverage_matrix, interference_pairs, interference_penalties, optimization = best_payload
 
     # --- Post-MILP radius refinement: shrink each selected tower to minimum needed ---
     if refine_radii and optimization.selected_candidates:
