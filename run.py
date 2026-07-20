@@ -293,6 +293,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--grid", action="store_true", help="Enable hexagonal grid candidate locations")
     parser.add_argument("--grid-spacing", type=float, default=50.0, help="Grid spacing in km")
     parser.add_argument("--refine", action="store_true", help="Enable per-tower radius refinement (WARNING: produces more than 2 radii)")
+    parser.add_argument("--pareto", action="store_true", help="Run epsilon-constraint sweep to trace the cost-vs-interference Pareto front")
+    parser.add_argument("--pareto-steps", type=int, default=20, help="Number of epsilon steps for Pareto front sweep")
     parser.add_argument("--output", type=str, default=None, help="Path to output .txt file (one line per tower: latitude, longitude, radius)")
     parser.add_argument("--plot-output", type=str, default=None, help="Path to save the visualization image, for example images/final_topology.png")
     parser.add_argument("--no-plot", action="store_true", help="Skip the map visualisation")
@@ -408,6 +410,84 @@ def main() -> None:
         plot_result(result, total_cost, overlap_percentage, plot_output, show=True)
     elif plot_output:
         plot_result(result, total_cost, overlap_percentage, plot_output, show=False)
+
+    # ── Pareto front sweep (ε-constraint) ─────────────────────────
+    if args.pareto:
+        from core.candidates import generate_candidate_locations
+        from core.pareto import compute_pareto_front, pareto_front_summary
+
+        print("\n" + "=" * 70)
+        print("PARETO FRONT — ε-constraint sweep")
+        print("=" * 70)
+        print(f"Radius pair: ({result.radius_plan.dense_radius_km}, {result.radius_plan.sparse_radius_km}) km")
+        print(f"ε steps: {args.pareto_steps}")
+
+        pareto_locations = generate_candidate_locations(
+            result.cities, result.labels,
+            include_cluster_centroids=True,
+            include_midpoints=not args.no_midpoints,
+            midpoint_max_distance_km=args.midpoint_max_distance,
+            include_voronoi=args.voronoi,
+        )
+        radii_km = (result.radius_plan.dense_radius_km, result.radius_plan.sparse_radius_km)
+
+        front = compute_pareto_front(
+            pareto_locations, result.cities, radii_km,
+            num_steps=args.pareto_steps,
+            time_limit=args.radius_time_limit,
+            use_lp_pruning=True,
+        )
+
+        print(pareto_front_summary(front))
+
+        # ── Pareto front plot ─────────────────────────────────────
+        if front and not args.no_plot:
+            import matplotlib.pyplot as plt
+
+            fig, ax = plt.subplots(figsize=(9, 6), facecolor="#2b2b3d")
+            ax.set_facecolor("#1e1e2e")
+
+            costs = [p.cost for p in front]
+            interfs = [p.interference for p in front]
+
+            ax.plot(interfs, costs, "o-", color="#00e676", linewidth=2, markersize=8,
+                    markerfacecolor="#00e676", markeredgecolor="white", markeredgewidth=0.5)
+            ax.fill_between(interfs, costs, alpha=0.15, color="#00e676")
+
+            # Annotate extremes
+            ax.annotate(
+                f"Min interference\ncost={costs[0]:.2f}, interf={interfs[0]:.3f}",
+                xy=(interfs[0], costs[0]), xytext=(15, 15),
+                textcoords="offset points", fontsize=8, color="white",
+                arrowprops=dict(arrowstyle="->", color="#888", lw=0.8),
+            )
+            ax.annotate(
+                f"Min cost\ncost={costs[-1]:.2f}, interf={interfs[-1]:.3f}",
+                xy=(interfs[-1], costs[-1]), xytext=(-15, -25),
+                textcoords="offset points", fontsize=8, color="white",
+                arrowprops=dict(arrowstyle="->", color="#888", lw=0.8),
+            )
+
+            ax.set_xlabel("Total Interference Penalty  Σ Pₚ·yₚ", color="white", fontsize=11, fontweight="bold")
+            ax.set_ylabel("Total Cost", color="white", fontsize=11, fontweight="bold")
+            ax.set_title(
+                f"Pareto Front — Cost vs Interference\n"
+                f"({result.radius_plan.dense_radius_km}, {result.radius_plan.sparse_radius_km}) km | "
+                f"{len(front)} non-dominated points",
+                color="white", fontsize=13, fontweight="bold", pad=12,
+            )
+            ax.tick_params(colors="white", labelsize=9)
+            for spine in ax.spines.values():
+                spine.set_color("#555")
+            ax.grid(True, alpha=0.15, color="white")
+
+            pareto_plot_path = plot_output.replace(".png", "_pareto.png") if plot_output else "images/pareto_front.png"
+            fig.savefig(pareto_plot_path, dpi=200, bbox_inches="tight", facecolor=fig.get_facecolor())
+            print(f"\nWrote Pareto front plot to {pareto_plot_path}")
+            if args.plot_output or args.no_plot:
+                plt.close(fig)
+            else:
+                plt.show()
 
 if __name__ == "__main__":
     main()

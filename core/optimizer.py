@@ -35,23 +35,38 @@ def solve(
     mutually_exclusive_locations: bool = True,
     time_limit: float | None = 60.0,
     relaxed: bool = False,
+    epsilon: float | None = None,
 ) -> OptimizationResult:
     """Solve the linear tower placement model using PuLP.
+
+    Two objective modes are supported:
+
+    **Weighted-sum mode (default, epsilon=None):**
+        minimize  α·Σ cost(i)·xᵢ  +  (1-α)·Σ Pₚ·yₚ
+
+    **ε-constraint mode (epsilon is not None):**
+        minimize  Σ cost(i)·xᵢ
+        s.t.      Σ Pₚ·yₚ  ≤  ε
+
+    The ε-constraint mode produces one point on the cost-vs-interference
+    Pareto front. Sweeping ε traces the full trade-off curve.
 
     Parameters
     ----------
     relaxed : bool
         If True, relax binary tower-selection variables to continuous [0, 1].
-        This converts the MILP into an LP that solves much faster and provides
-        a valid lower bound on the MILP objective.
+    epsilon : float or None
+        Interference budget. When set, the objective is pure cost minimization
+        with interference constrained to ≤ epsilon. Alpha is ignored.
     """
-
-    if not 0.0 <= alpha <= 1.0:
-        raise ValueError("alpha must be within the closed interval [0, 1].")
 
     candidate_count = len(candidates)
     pair_count = len(interference_pairs)
     city_count = int(coverage_matrix.shape[1])
+    use_epsilon = epsilon is not None
+
+    if not use_epsilon and not 0.0 <= alpha <= 1.0:
+        raise ValueError("alpha must be within the closed interval [0, 1].")
 
     model = pulp.LpProblem(
         "Tower_Placement" if not relaxed else "Tower_Placement_LP_Relaxation",
@@ -65,20 +80,24 @@ def solve(
     y = [pulp.LpVariable(f"y_{p}", cat=pulp.LpContinuous, lowBound=0.0, upBound=1.0) for p in range(pair_count)]
     z = [] if hard_coverage else [pulp.LpVariable(f"z_{j}", cat=pulp.LpBinary) for j in range(city_count)]
 
-    c_max = max(c.cost for c in candidates) if candidates else 1.0
-    C_bar = alpha * c_max
+    # ── Objective ──────────────────────────────────────────────────────
+    if use_epsilon:
+        # Cost-only objective; interference is a constraint
+        model += pulp.lpSum([candidates[i].cost * x[i] for i in range(candidate_count)])
+    else:
+        c_max = max(c.cost for c in candidates) if candidates else 1.0
+        C_bar = alpha * c_max
+        objective_expr = []
+        for i in range(candidate_count):
+            objective_expr.append(alpha * candidates[i].cost * x[i])
+        for p in range(pair_count):
+            objective_expr.append((1.0 - alpha) * interference_penalties[p] * y[p])
+        if not hard_coverage:
+            for j in range(city_count):
+                objective_expr.append(-beta * C_bar * z[j])
+        model += pulp.lpSum(objective_expr)
 
-    objective_expr = []
-    for i in range(candidate_count):
-        objective_expr.append(alpha * candidates[i].cost * x[i])
-    for p in range(pair_count):
-        objective_expr.append((1.0 - alpha) * interference_penalties[p] * y[p])
-    if not hard_coverage:
-        for j in range(city_count):
-            objective_expr.append(-beta * C_bar * z[j])
-
-    model += pulp.lpSum(objective_expr)
-
+    # ── Coverage constraints ───────────────────────────────────────────
     for j in range(city_count):
         covering_candidates = np.flatnonzero(coverage_matrix[:, j])
         if hard_coverage:
@@ -88,6 +107,7 @@ def solve(
         else:
             model += z[j] <= pulp.lpSum([x[i] for i in covering_candidates])
 
+    # ── Tower type requirements ────────────────────────────────────────
     if require_all_tower_types:
         tower_types = sorted({candidate.tower_type for candidate in candidates})
         if len(tower_types) < 2:
@@ -96,6 +116,7 @@ def solve(
             type_indices = [i for i, candidate in enumerate(candidates) if candidate.tower_type == tower_type]
             model += pulp.lpSum([x[i] for i in type_indices]) >= 1
 
+    # ── Mutual exclusion ───────────────────────────────────────────────
     if mutually_exclusive_locations:
         location_groups: dict[str, list[int]] = defaultdict(list)
         for i, candidate in enumerate(candidates):
@@ -105,11 +126,17 @@ def solve(
             if len(indices) > 1:
                 model += pulp.lpSum([x[i] for i in indices]) <= 1
 
+    # ── McCormick interference linearization ───────────────────────────
     for p, (left_index, right_index) in enumerate(interference_pairs):
         model += y[p] >= x[left_index] + x[right_index] - 1
         model += y[p] <= x[left_index]
         model += y[p] <= x[right_index]
 
+    # ── Interference budget constraint (ε-constraint mode) ─────────────
+    if use_epsilon and pair_count > 0:
+        model += pulp.lpSum([interference_penalties[p] * y[p] for p in range(pair_count)]) <= epsilon
+
+    # ── Solve ──────────────────────────────────────────────────────────
     solver = pulp.PULP_CBC_CMD(timeLimit=time_limit, msg=False)
     status = model.solve(solver)
 
