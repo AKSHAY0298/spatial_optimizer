@@ -284,6 +284,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--time-limit", type=float, default=60.0, help="MILP solver time limit in seconds")
     parser.add_argument("--no-midpoints", action="store_true", help="Disable midpoint candidate locations")
     parser.add_argument("--voronoi", action="store_true", help="Enable Voronoi vertex candidate locations (experimental)")
+    parser.add_argument("--meanshift", action="store_true", help="Enable Mean-Shift density mode candidate locations (experimental)")
     parser.add_argument(
         "--midpoint-max-distance",
         type=float,
@@ -320,6 +321,7 @@ def main() -> None:
         include_midpoints=not args.no_midpoints,
         midpoint_max_distance_km=args.midpoint_max_distance,
         include_voronoi=args.voronoi,
+        include_meanshift=args.meanshift,
         include_grid=args.grid,
         grid_spacing_km=args.grid_spacing,
         refine_radii=args.refine,

@@ -205,6 +205,7 @@ def optimize_radius_pair_with_milp(
     include_midpoints: bool = True,
     midpoint_max_distance_km: float = 80.0,
     include_voronoi: bool = False,
+    include_meanshift: bool = False,
     include_grid: bool = False,
     grid_spacing_km: float = 50.0,
     refine_radii: bool = True,
@@ -262,6 +263,7 @@ def optimize_radius_pair_with_milp(
         include_midpoints=include_midpoints,
         midpoint_max_distance_km=midpoint_max_distance_km,
         include_voronoi=include_voronoi,
+        include_meanshift=include_meanshift,
         include_grid=include_grid,
         grid_spacing_km=grid_spacing_km,
     )

@@ -11,6 +11,61 @@ from .costs import tower_cost
 from .radius_search import RadiusPlan
 
 
+def _meanshift_candidate_locations(
+    cities: pd.DataFrame,
+    bandwidth_quantile: float = 0.08,
+) -> list[tuple[float, float]]:
+    """Generate candidate tower locations from Mean-Shift density modes.
+
+    Mean-Shift is a mode-seeking algorithm that finds local maxima of the
+    probability density function of city coordinates. Unlike DBSCAN (which
+    finds connected dense regions), Mean-Shift identifies the exact points
+    of highest city density — natural locations for coverage-maximizing towers.
+
+    Parameters
+    ----------
+    cities : pd.DataFrame
+        Must contain 'latitude' and 'longitude' columns.
+    bandwidth_quantile : float
+        Controls the kernel bandwidth as a quantile of pairwise distances.
+        Lower values → smaller bandwidth → more modes (clusters).
+        0.25 gives ~15-40 modes for 236 cities.
+    """
+    from sklearn.cluster import MeanShift, estimate_bandwidth
+
+    from .spatial import project_coordinates_km
+
+    coords = cities[["latitude", "longitude"]].to_numpy(dtype=float)
+    if len(coords) < 3:
+        return []
+
+    projected = project_coordinates_km(coords)
+
+    # Estimate bandwidth from the data
+    try:
+        bandwidth = estimate_bandwidth(projected, quantile=bandwidth_quantile, n_samples=min(200, len(projected)))
+        bandwidth = max(bandwidth, 15.0)  # minimum 15 km bandwidth
+    except Exception:
+        bandwidth = 30.0  # fallback
+
+    # Mean-Shift clustering
+    ms = MeanShift(bandwidth=bandwidth, bin_seeding=True, max_iter=300)
+    ms.fit(projected)
+
+    # Convert cluster centers back to lat/lon
+    ref_lat_rad = float(np.radians(coords[:, 0]).mean())
+    cos_ref = math.cos(ref_lat_rad)
+    earth_r = 6371.0088
+
+    candidates: list[tuple[float, float]] = []
+    for center in ms.cluster_centers_:
+        lat = float(np.degrees(center[1] / earth_r))
+        lon = float(np.degrees(center[0] / (earth_r * cos_ref)))
+        candidates.append((lat, lon))
+
+    return candidates
+
+
 @dataclass(frozen=True)
 class TowerCandidate:
     candidate_id: str
@@ -247,6 +302,7 @@ def generate_candidate_locations(
     include_midpoints: bool = True,
     midpoint_max_distance_km: float = 80.0,
     include_voronoi: bool = False,
+    include_meanshift: bool = False,
     include_grid: bool = False,
     grid_spacing_km: float = 50.0,
     dedup_tolerance_km: float = 1.5,
@@ -254,11 +310,12 @@ def generate_candidate_locations(
     """Generate possible physical tower locations independent of radius.
 
     Sources:
-      1. Weighted geometric medians of DBSCAN clusters (robust to outliers)
+      1. Cluster centroids (arithmetic mean of DBSCAN cluster members)
       2. Every city location (always included)
       3. Midpoints between neighboring cities (geometric candidates)
-      4. Voronoi vertices within the convex hull (optimal coverage points)
-      5. Hexagonal grid points near cities (optional, for very dense search)
+      4. Voronoi vertices within the convex hull (experimental, opt-in)
+      5. Mean-Shift density modes (experimental, opt-in)
+      6. Hexagonal grid points near cities (optional, for very dense search)
 
     All sources are merged and near-duplicates (within *dedup_tolerance_km*)
     are removed, keeping the first occurrence.
@@ -305,6 +362,11 @@ def generate_candidate_locations(
             voronoi_raw = [voronoi_raw[i] for i in sorted(top_idx)]
         for vor_lat, vor_lon in voronoi_raw:
             raw.append((vor_lat, vor_lon, f"voronoi_{len(raw)}", "voronoi", -1))
+
+    # --- Mean-Shift density mode candidates ---
+    if include_meanshift:
+        for ms_lat, ms_lon in _meanshift_candidate_locations(cities):
+            raw.append((ms_lat, ms_lon, f"meanshift_{len(raw)}", "meanshift", -1))
 
     # --- Grid-based candidates ---
     if include_grid:
