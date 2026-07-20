@@ -9,6 +9,22 @@ import pulp
 from .candidates import TowerCandidate
 
 
+_HIGHS_AVAILABLE: bool | None = None
+
+
+def _make_solver(time_limit: float | None):
+    """Return the fastest available PuLP solver (HiGHS if installed, else CBC)."""
+    global _HIGHS_AVAILABLE
+    if _HIGHS_AVAILABLE is None:
+        try:
+            _HIGHS_AVAILABLE = pulp.HiGHS(msg=False).available()
+        except Exception:
+            _HIGHS_AVAILABLE = False
+    if _HIGHS_AVAILABLE:
+        return pulp.HiGHS(timeLimit=time_limit, msg=False)
+    return pulp.PULP_CBC_CMD(timeLimit=time_limit, msg=False)
+
+
 @dataclass(frozen=True)
 class OptimizationResult:
     status: int
@@ -127,17 +143,18 @@ def solve(
                 model += pulp.lpSum([x[i] for i in indices]) <= 1
 
     # ── McCormick interference linearization ───────────────────────────
+    # Only the lower bound is needed: y has a nonnegative objective (or budget)
+    # coefficient and is minimized, so y = max(0, x_l + x_r - 1) at optimality.
+    # The upper bounds y <= x_l and y <= x_r are redundant and only bloat CBC.
     for p, (left_index, right_index) in enumerate(interference_pairs):
         model += y[p] >= x[left_index] + x[right_index] - 1
-        model += y[p] <= x[left_index]
-        model += y[p] <= x[right_index]
 
     # ── Interference budget constraint (ε-constraint mode) ─────────────
     if use_epsilon and pair_count > 0:
         model += pulp.lpSum([interference_penalties[p] * y[p] for p in range(pair_count)]) <= epsilon
 
     # ── Solve ──────────────────────────────────────────────────────────
-    solver = pulp.PULP_CBC_CMD(timeLimit=time_limit, msg=False)
+    solver = _make_solver(time_limit)
     status = model.solve(solver)
 
     if candidate_count > 0 and x[0].varValue is None:
@@ -148,7 +165,16 @@ def solve(
 
     selected_indices = np.flatnonzero(solution_x > 0.5)
     selected_candidates = [candidates[index] for index in selected_indices]
-    pair_values = solution_y
+    if relaxed:
+        pair_values = solution_y
+    else:
+        # Derive pair activation from the realized selection so reported
+        # interference is exact even when the solver leaves slack in y.
+        selected_mask = solution_x > 0.5
+        pair_values = np.array(
+            [1.0 if (selected_mask[li] and selected_mask[ri]) else 0.0 for li, ri in interference_pairs],
+            dtype=float,
+        )
 
     if selected_indices.size == 0:
         coverage_ratio = 0.0
@@ -171,3 +197,111 @@ def solve(
         selected_candidates=selected_candidates,
         pair_values=pair_values,
     )
+
+
+def solve_with_lazy_interference(
+    candidates: list[TowerCandidate],
+    coverage_matrix: np.ndarray,
+    interference_pairs: list[tuple[int, int]],
+    interference_penalties: np.ndarray,
+    *,
+    alpha: float = 0.5,
+    beta: float = 0.0,
+    hard_coverage: bool = True,
+    require_all_tower_types: bool = True,
+    mutually_exclusive_locations: bool = True,
+    time_limit: float | None = 60.0,
+    epsilon: float | None = None,
+    max_rounds: int = 30,
+) -> tuple[OptimizationResult, list[tuple[int, int]], np.ndarray]:
+    """Solve the MILP with lazily generated interference pairs.
+
+    Dense candidate menus can produce millions of overlapping pairs, but any
+    optimal solution only selects a few dozen towers, so almost all y-variables
+    are irrelevant. Instead of instantiating every pair up front, this routine:
+
+      1. Solves the MILP with only the currently *active* pair set (initially
+         empty), which is a relaxation of the full model.
+      2. Finds pairs whose towers were both selected but are not yet in the
+         model ("violated" pairs), activates them, and re-solves.
+      3. Stops when the incumbent solution realizes no inactive pair — at that
+         point the relaxation is exact for the incumbent, so it is optimal for
+         the full model (up to the sub-solver's own optimality tolerance).
+
+    Returns the final result plus the active pair subset and penalties that the
+    result's ``pair_values`` are aligned with.
+    """
+
+    import dataclasses
+
+    pair_array = np.asarray(interference_pairs, dtype=int).reshape(-1, 2)
+    penalties = np.asarray(interference_penalties, dtype=float)
+    active = np.zeros(len(pair_array), dtype=bool)
+
+    result: OptimizationResult | None = None
+    active_pairs: list[tuple[int, int]] = []
+    active_penalties = np.zeros(0, dtype=float)
+    violated = np.zeros(len(pair_array), dtype=bool)
+
+    for _ in range(max_rounds):
+        active_indices = np.flatnonzero(active)
+        active_pairs = [tuple(pair) for pair in pair_array[active_indices]]
+        active_penalties = penalties[active_indices]
+
+        result = solve(
+            candidates,
+            coverage_matrix,
+            active_pairs,
+            active_penalties,
+            alpha=alpha,
+            beta=beta,
+            hard_coverage=hard_coverage,
+            require_all_tower_types=require_all_tower_types,
+            mutually_exclusive_locations=mutually_exclusive_locations,
+            time_limit=time_limit,
+            relaxed=False,
+            epsilon=epsilon,
+        )
+
+        if len(pair_array) == 0:
+            break
+
+        selected_mask = np.zeros(len(candidates), dtype=bool)
+        selected_mask[result.selected_indices] = True
+        left_selected = selected_mask[pair_array[:, 0]]
+        right_selected = selected_mask[pair_array[:, 1]]
+        violated = left_selected & right_selected & ~active
+        if not violated.any():
+            break
+        active |= violated
+
+    assert result is not None
+
+    if violated.any():
+        # Round cap hit before convergence: the model never charged some
+        # realized pairs. Report the incumbent honestly by rebuilding the
+        # metrics over active ∪ realized pairs.
+        active |= violated
+        active_indices = np.flatnonzero(active)
+        active_pairs = [tuple(pair) for pair in pair_array[active_indices]]
+        active_penalties = penalties[active_indices]
+        selected_mask = np.zeros(len(candidates), dtype=bool)
+        selected_mask[result.selected_indices] = True
+        pair_values = (
+            selected_mask[pair_array[active_indices, 0]]
+            & selected_mask[pair_array[active_indices, 1]]
+        ).astype(float)
+        total_interference = float(np.dot(active_penalties, pair_values))
+        objective_value = (
+            result.total_cost
+            if epsilon is not None
+            else alpha * result.total_cost + (1.0 - alpha) * total_interference
+        )
+        result = dataclasses.replace(
+            result,
+            total_interference=total_interference,
+            objective_value=objective_value,
+            pair_values=pair_values,
+        )
+
+    return result, active_pairs, active_penalties

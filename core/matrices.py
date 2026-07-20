@@ -7,7 +7,7 @@ import pandas as pd
 from scipy.spatial import cKDTree
 
 from .candidates import TowerCandidate
-from .spatial import haversine_distance_km, pairwise_haversine_km, project_coordinates_km
+from .spatial import haversine_distance_km, haversine_rows_km, pairwise_haversine_km, project_coordinates_km
 
 
 @dataclass(frozen=True)
@@ -43,7 +43,12 @@ def normalized_overlap_penalty(distance_km: float, radius_a_km: float, radius_b_
 
 
 def build_interference_pairs(candidates: list[TowerCandidate]) -> tuple[list[tuple[int, int]], np.ndarray]:
-    """Build filtered candidate pairs and their overlap penalties using a KD-tree."""
+    """Build filtered candidate pairs and their overlap penalties using a KD-tree.
+
+    Pairs of candidates sharing the same physical location are skipped: the
+    mutual-exclusion constraint prevents them from ever being selected together,
+    so they can never contribute interference.
+    """
 
     if len(candidates) < 2:
         return [], np.zeros(0, dtype=float)
@@ -52,23 +57,38 @@ def build_interference_pairs(candidates: list[TowerCandidate]) -> tuple[list[tup
         [[candidate.latitude, candidate.longitude] for candidate in candidates],
         dtype=float,
     )
+    radii = np.array([candidate.radius_km for candidate in candidates], dtype=float)
     projected_coordinates = project_coordinates_km(coordinates)
     tree = cKDTree(projected_coordinates)
-    max_radius = max(candidate.radius_km for candidate in candidates)
-    candidate_pairs = sorted(tree.query_pairs(r=2.0 * max_radius))
+    max_radius = float(radii.max())
+    # 5% margin absorbs projection distortion relative to haversine distances
+    pair_array = tree.query_pairs(r=2.1 * max_radius, output_type="ndarray")
+    if pair_array.size == 0:
+        return [], np.zeros(0, dtype=float)
 
-    filtered_pairs: list[tuple[int, int]] = []
-    penalties: list[float] = []
+    left = pair_array[:, 0]
+    right = pair_array[:, 1]
 
-    for left_index, right_index in candidate_pairs:
-        distance_km = haversine_distance_km(coordinates[left_index], coordinates[right_index])
-        penalty = normalized_overlap_penalty(
-            distance_km,
-            candidates[left_index].radius_km,
-            candidates[right_index].radius_km,
-        )
-        if penalty > 0.0:
-            filtered_pairs.append((left_index, right_index))
-            penalties.append(penalty)
+    location_ids = np.array([candidate.location_id or "" for candidate in candidates])
+    distinct_location_mask = location_ids[left] != location_ids[right]
+    left = left[distinct_location_mask]
+    right = right[distinct_location_mask]
+    if left.size == 0:
+        return [], np.zeros(0, dtype=float)
 
+    distances_km = haversine_rows_km(coordinates[left], coordinates[right])
+    radius_sums = radii[left] + radii[right]
+    penalties = (radius_sums - distances_km) / radius_sums
+    overlap_mask = penalties > 0.0
+
+    left = left[overlap_mask]
+    right = right[overlap_mask]
+    penalties = penalties[overlap_mask]
+
+    order = np.lexsort((right, left))
+    left = left[order]
+    right = right[order]
+    penalties = penalties[order]
+
+    filtered_pairs = list(zip(left.tolist(), right.tolist()))
     return filtered_pairs, np.asarray(penalties, dtype=float)

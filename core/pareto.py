@@ -7,7 +7,7 @@ import pandas as pd
 
 from .candidates import generate_candidates_from_locations, TowerLocation
 from .matrices import build_coverage_matrix, build_interference_pairs
-from .optimizer import solve
+from .optimizer import solve_with_lazy_interference
 
 
 @dataclass(frozen=True)
@@ -56,7 +56,7 @@ def compute_pareto_front(
     int_pairs, int_penalties = build_interference_pairs(candidates)
 
     # ── Extreme: minimum cost (ε=∞) ────────────────────────────────────
-    result_min_cost = solve(
+    result_min_cost, _, _ = solve_with_lazy_interference(
         candidates, coverage_matrix, int_pairs, int_penalties,
         epsilon=1e9, hard_coverage=True, require_all_tower_types=True,
         mutually_exclusive_locations=True, time_limit=time_limit,
@@ -67,7 +67,7 @@ def compute_pareto_front(
     # ── Heuristic: find a lower bound on ε via α=0 (interference-only) ──
     long_limit = max((time_limit or 30.0) * 3.0, 90.0)
     try:
-        result_min_int = solve(
+        result_min_int, _, _ = solve_with_lazy_interference(
             candidates, coverage_matrix, int_pairs, int_penalties,
             alpha=0.0, hard_coverage=True, require_all_tower_types=True,
             mutually_exclusive_locations=True, time_limit=long_limit,
@@ -86,7 +86,7 @@ def compute_pareto_front(
     for iteration in range(12):
         mid = (lo + hi) / 2.0
         try:
-            result = solve(
+            result, _, _ = solve_with_lazy_interference(
                 candidates, coverage_matrix, int_pairs, int_penalties,
                 epsilon=float(mid), hard_coverage=True,
                 require_all_tower_types=True, mutually_exclusive_locations=True,
@@ -142,7 +142,7 @@ def compute_pareto_front(
             if eps >= eps_max:
                 continue
             try:
-                result = solve(
+                result, _, _ = solve_with_lazy_interference(
                     candidates, coverage_matrix, int_pairs, int_penalties,
                     epsilon=float(eps), hard_coverage=True,
                     require_all_tower_types=True, mutually_exclusive_locations=True,
