@@ -18,7 +18,7 @@ from .matrices import (
     build_interference_pairs,
     normalized_overlap_penalty,
 )
-from .optimizer import OptimizationResult, solve
+from .optimizer import OptimizationResult, solve, solve_with_lazy_interference
 from .radius_search import RadiusPlan
 from .spatial import haversine_distance_km, pairwise_haversine_km
 
@@ -205,6 +205,7 @@ def optimize_radius_pair_with_milp(
     include_midpoints: bool = True,
     midpoint_max_distance_km: float = 80.0,
     include_voronoi: bool = False,
+    include_meanshift: bool = False,
     include_grid: bool = False,
     grid_spacing_km: float = 50.0,
     refine_radii: bool = True,
@@ -262,6 +263,7 @@ def optimize_radius_pair_with_milp(
         include_midpoints=include_midpoints,
         midpoint_max_distance_km=midpoint_max_distance_km,
         include_voronoi=include_voronoi,
+        include_meanshift=include_meanshift,
         include_grid=include_grid,
         grid_spacing_km=grid_spacing_km,
     )
@@ -307,12 +309,28 @@ def optimize_radius_pair_with_milp(
         candidates, coverage_matrix = _filter_uncovering_candidates(candidates, coverage_matrix)
         interference_pairs, interference_penalties = build_interference_pairs(candidates)
 
-        # LP relaxation — fast lower bound on the MILP objective
-        lp_result = solve(
+        # MILP with lazily generated interference pairs — only pairs that a
+        # candidate solution actually realizes ever enter the model.
+        optimization, active_pairs, active_penalties = solve_with_lazy_interference(
             candidates,
             coverage_matrix,
             interference_pairs,
             interference_penalties,
+            alpha=alpha,
+            beta=0.0,
+            hard_coverage=True,
+            require_all_tower_types=True,
+            mutually_exclusive_locations=True,
+            time_limit=time_limit_per_pair,
+        )
+
+        # LP relaxation over the active pair subset — a valid lower bound on
+        # the full MILP objective (the subset model is itself a relaxation).
+        lp_result = solve(
+            candidates,
+            coverage_matrix,
+            active_pairs,
+            active_penalties,
             alpha=alpha,
             beta=0.0,
             hard_coverage=True,
@@ -320,21 +338,6 @@ def optimize_radius_pair_with_milp(
             mutually_exclusive_locations=True,
             time_limit=time_limit_per_pair,
             relaxed=True,
-        )
-
-        # Full MILP solve
-        optimization = solve(
-            candidates,
-            coverage_matrix,
-            interference_pairs,
-            interference_penalties,
-            alpha=alpha,
-            beta=0.0,
-            hard_coverage=True,
-            require_all_tower_types=True,
-            mutually_exclusive_locations=True,
-            time_limit=time_limit_per_pair,
-            relaxed=False,
         )
 
         solved_eval = RadiusPairEvaluation(
@@ -363,8 +366,8 @@ def optimize_radius_pair_with_milp(
             best_payload = (
                 candidates,
                 coverage_matrix,
-                interference_pairs,
-                interference_penalties,
+                active_pairs,
+                active_penalties,
                 optimization,
             )
 
@@ -426,17 +429,17 @@ def optimize_radius_pair_with_milp(
                 fc, fcov = _filter_uncovering_candidates(fc, fcov)
                 fint_pairs, fint_penalties = build_interference_pairs(fc)
 
-                # LP relaxation
-                lp_r = solve(fc, fcov, fint_pairs, fint_penalties, alpha=alpha,
+                # MILP with lazily generated interference pairs
+                milp_r, factive_pairs, factive_penalties = solve_with_lazy_interference(
+                    fc, fcov, fint_pairs, fint_penalties, alpha=alpha,
+                    beta=0.0, hard_coverage=True, require_all_tower_types=True,
+                    mutually_exclusive_locations=True, time_limit=time_limit_per_pair)
+
+                # LP relaxation over the active pair subset (valid lower bound)
+                lp_r = solve(fc, fcov, factive_pairs, factive_penalties, alpha=alpha,
                              beta=0.0, hard_coverage=True, require_all_tower_types=True,
                              mutually_exclusive_locations=True, time_limit=time_limit_per_pair,
                              relaxed=True)
-
-                # MILP
-                milp_r = solve(fc, fcov, fint_pairs, fint_penalties, alpha=alpha,
-                               beta=0.0, hard_coverage=True, require_all_tower_types=True,
-                               mutually_exclusive_locations=True, time_limit=time_limit_per_pair,
-                               relaxed=False)
 
                 fe = RadiusPairEvaluation(
                     dense_radius_km=fine_eval.dense_radius_km,
@@ -459,7 +462,7 @@ def optimize_radius_pair_with_milp(
                     continue
                 if fine_best_eval is None or milp_r.objective_value < float(fine_best_eval.milp_objective):
                     fine_best_eval = fe
-                    fine_best_payload = (fc, fcov, fint_pairs, fint_penalties, milp_r)
+                    fine_best_payload = (fc, fcov, factive_pairs, factive_penalties, milp_r)
 
             # If fine-grid found a better solution, use it
             if fine_best_eval is not None and fine_best_payload is not None:

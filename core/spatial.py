@@ -32,6 +32,26 @@ def haversine_distance_km(point_a: np.ndarray, point_b: np.ndarray) -> float:
     return float(2.0 * EARTH_RADIUS_KM * np.arcsin(np.sqrt(a)))
 
 
+def haversine_rows_km(points_a: np.ndarray, points_b: np.ndarray) -> np.ndarray:
+    """Element-wise great-circle distance between two aligned (n, 2) arrays."""
+
+    coordinates_a = np.asarray(points_a, dtype=float)
+    coordinates_b = np.asarray(points_b, dtype=float)
+
+    latitude_a = np.radians(coordinates_a[:, 0])
+    longitude_a = np.radians(coordinates_a[:, 1])
+    latitude_b = np.radians(coordinates_b[:, 0])
+    longitude_b = np.radians(coordinates_b[:, 1])
+
+    delta_latitude = latitude_b - latitude_a
+    delta_longitude = longitude_b - longitude_a
+    a = (
+        np.sin(delta_latitude / 2.0) ** 2
+        + np.cos(latitude_a) * np.cos(latitude_b) * np.sin(delta_longitude / 2.0) ** 2
+    )
+    return 2.0 * EARTH_RADIUS_KM * np.arcsin(np.sqrt(a))
+
+
 def pairwise_haversine_km(points_a: np.ndarray, points_b: np.ndarray | None = None) -> np.ndarray:
     """Compute a matrix of great-circle distances in kilometers."""
 
