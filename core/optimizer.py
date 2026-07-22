@@ -9,19 +9,40 @@ import pulp
 from .candidates import TowerCandidate
 
 
-_HIGHS_AVAILABLE: bool | None = None
+_SOLVER_CACHE: dict[str, bool | None] = {"gurobi": None, "highs": None}
 
 
-def _make_solver(time_limit: float | None):
-    """Return the fastest available PuLP solver (HiGHS if installed, else CBC)."""
-    global _HIGHS_AVAILABLE
-    if _HIGHS_AVAILABLE is None:
+def _make_solver(time_limit: float | None, prefer: str | None = None):
+    """Return the best available PuLP solver.
+
+    Priority (default): Gurobi > HiGHS > CBC.
+    Pass ``prefer="cbc"`` to force CBC (useful for comparisons).
+    """
+    global _SOLVER_CACHE
+
+    # ── Honour explicit preference ──────────────────────────────────────
+    if prefer == "cbc":
+        return pulp.PULP_CBC_CMD(timeLimit=time_limit, msg=False)
+
+    # ── Gurobi ───────────────────────────────────────────────────────────
+    if _SOLVER_CACHE["gurobi"] is None:
         try:
-            _HIGHS_AVAILABLE = pulp.HiGHS(msg=False).available()
+            _SOLVER_CACHE["gurobi"] = pulp.GUROBI(msg=False).available()
         except Exception:
-            _HIGHS_AVAILABLE = False
-    if _HIGHS_AVAILABLE:
+            _SOLVER_CACHE["gurobi"] = False
+    if _SOLVER_CACHE["gurobi"]:
+        return pulp.GUROBI(timeLimit=time_limit, msg=False)
+
+    # ── HiGHS ────────────────────────────────────────────────────────────
+    if _SOLVER_CACHE["highs"] is None:
+        try:
+            _SOLVER_CACHE["highs"] = pulp.HiGHS(msg=False).available()
+        except Exception:
+            _SOLVER_CACHE["highs"] = False
+    if _SOLVER_CACHE["highs"]:
         return pulp.HiGHS(timeLimit=time_limit, msg=False)
+
+    # ── CBC fallback ─────────────────────────────────────────────────────
     return pulp.PULP_CBC_CMD(timeLimit=time_limit, msg=False)
 
 
