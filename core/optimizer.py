@@ -23,6 +23,15 @@ def _make_solver(time_limit: float | None, prefer: str | None = None):
     # ── Honour explicit preference ──────────────────────────────────────
     if prefer == "cbc":
         return pulp.PULP_CBC_CMD(timeLimit=time_limit, msg=False)
+    if prefer == "gurobi":
+        try:
+            g = pulp.GUROBI(msg=False)
+            if g.available():
+                return pulp.GUROBI(timeLimit=time_limit, msg=False)
+        except Exception:
+            pass
+        raise RuntimeError("Gurobi was requested (--solver gurobi) but is not available.")
+
 
     # ── Gurobi ───────────────────────────────────────────────────────────
     if _SOLVER_CACHE["gurobi"] is None:
@@ -73,6 +82,7 @@ def solve(
     time_limit: float | None = 60.0,
     relaxed: bool = False,
     epsilon: float | None = None,
+    solver: str | None = None,
 ) -> OptimizationResult:
     """Solve the linear tower placement model using PuLP.
 
@@ -175,7 +185,7 @@ def solve(
         model += pulp.lpSum([interference_penalties[p] * y[p] for p in range(pair_count)]) <= epsilon
 
     # ── Solve ──────────────────────────────────────────────────────────
-    solver = _make_solver(time_limit)
+    solver = _make_solver(time_limit, prefer=solver)
     status = model.solve(solver)
 
     if candidate_count > 0 and x[0].varValue is None:
@@ -234,6 +244,7 @@ def solve_with_lazy_interference(
     time_limit: float | None = 60.0,
     epsilon: float | None = None,
     max_rounds: int = 30,
+    solver: str | None = None,
 ) -> tuple[OptimizationResult, list[tuple[int, int]], np.ndarray]:
     """Solve the MILP with lazily generated interference pairs.
 
@@ -282,6 +293,7 @@ def solve_with_lazy_interference(
             time_limit=time_limit,
             relaxed=False,
             epsilon=epsilon,
+            solver=solver,
         )
 
         if len(pair_array) == 0:
