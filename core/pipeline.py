@@ -49,6 +49,7 @@ def run(
     grid_spacing_km: float = 50.0,
     refine_radii: bool = False,
     refine_radii_grid: bool = True,
+    solver: str | None = None,
 ) -> Result:
     """Execute the full two-phase pipeline from data loading to optimization."""
 
@@ -73,6 +74,7 @@ def run(
             grid_spacing_km=grid_spacing_km,
             refine_radii=refine_radii,
             refine_radii_grid=refine_radii_grid,
+            solver=solver,
         )
         radius_plan = radius_search.radius_plan
         candidates = radius_search.candidates
@@ -103,6 +105,7 @@ def run(
             require_all_tower_types=True,
             mutually_exclusive_locations=True,
             time_limit=time_limit,
+            solver=solver,
         )
     else:
         raise ValueError("radius_mode must be 'milp_pair_search' or 'dbscan_representative'.")

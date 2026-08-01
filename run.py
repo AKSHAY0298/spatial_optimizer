@@ -299,6 +299,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output", type=str, default=None, help="Path to output .txt file (one line per tower: latitude, longitude, radius)")
     parser.add_argument("--plot-output", type=str, default=None, help="Path to save the visualization image, for example images/final_topology.png")
     parser.add_argument("--no-plot", action="store_true", help="Skip the map visualisation")
+    parser.add_argument("--solver", type=str, default=None, choices=("gurobi", "cbc"), help="Force solver: gurobi or cbc (default: auto-detect)")
     return parser
 
 
@@ -325,6 +326,7 @@ def main() -> None:
         include_grid=args.grid,
         grid_spacing_km=args.grid_spacing,
         refine_radii=args.refine,
+        solver=args.solver,
     )
 
     print(f"Cities loaded: {len(result.cities)}")

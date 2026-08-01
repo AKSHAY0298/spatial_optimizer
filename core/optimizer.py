@@ -9,19 +9,49 @@ import pulp
 from .candidates import TowerCandidate
 
 
-_HIGHS_AVAILABLE: bool | None = None
+_SOLVER_CACHE: dict[str, bool | None] = {"gurobi": None, "highs": None}
 
 
-def _make_solver(time_limit: float | None):
-    """Return the fastest available PuLP solver (HiGHS if installed, else CBC)."""
-    global _HIGHS_AVAILABLE
-    if _HIGHS_AVAILABLE is None:
+def _make_solver(time_limit: float | None, prefer: str | None = None):
+    """Return the best available PuLP solver.
+
+    Priority (default): Gurobi > HiGHS > CBC.
+    Pass ``prefer="cbc"`` to force CBC (useful for comparisons).
+    """
+    global _SOLVER_CACHE
+
+    # ── Honour explicit preference ──────────────────────────────────────
+    if prefer == "cbc":
+        return pulp.PULP_CBC_CMD(timeLimit=time_limit, msg=False)
+    if prefer == "gurobi":
         try:
-            _HIGHS_AVAILABLE = pulp.HiGHS(msg=False).available()
+            g = pulp.GUROBI(msg=False)
+            if g.available():
+                return pulp.GUROBI(timeLimit=time_limit, msg=False)
         except Exception:
-            _HIGHS_AVAILABLE = False
-    if _HIGHS_AVAILABLE:
+            pass
+        raise RuntimeError("Gurobi was requested (--solver gurobi) but is not available.")
+
+
+    # ── Gurobi ───────────────────────────────────────────────────────────
+    if _SOLVER_CACHE["gurobi"] is None:
+        try:
+            _SOLVER_CACHE["gurobi"] = pulp.GUROBI(msg=False).available()
+        except Exception:
+            _SOLVER_CACHE["gurobi"] = False
+    if _SOLVER_CACHE["gurobi"]:
+        return pulp.GUROBI(timeLimit=time_limit, msg=False)
+
+    # ── HiGHS ────────────────────────────────────────────────────────────
+    if _SOLVER_CACHE["highs"] is None:
+        try:
+            _SOLVER_CACHE["highs"] = pulp.HiGHS(msg=False).available()
+        except Exception:
+            _SOLVER_CACHE["highs"] = False
+    if _SOLVER_CACHE["highs"]:
         return pulp.HiGHS(timeLimit=time_limit, msg=False)
+
+    # ── CBC fallback ─────────────────────────────────────────────────────
     return pulp.PULP_CBC_CMD(timeLimit=time_limit, msg=False)
 
 
@@ -52,6 +82,7 @@ def solve(
     time_limit: float | None = 60.0,
     relaxed: bool = False,
     epsilon: float | None = None,
+    solver: str | None = None,
 ) -> OptimizationResult:
     """Solve the linear tower placement model using PuLP.
 
@@ -154,7 +185,7 @@ def solve(
         model += pulp.lpSum([interference_penalties[p] * y[p] for p in range(pair_count)]) <= epsilon
 
     # ── Solve ──────────────────────────────────────────────────────────
-    solver = _make_solver(time_limit)
+    solver = _make_solver(time_limit, prefer=solver)
     status = model.solve(solver)
 
     if candidate_count > 0 and x[0].varValue is None:
@@ -213,6 +244,7 @@ def solve_with_lazy_interference(
     time_limit: float | None = 60.0,
     epsilon: float | None = None,
     max_rounds: int = 30,
+    solver: str | None = None,
 ) -> tuple[OptimizationResult, list[tuple[int, int]], np.ndarray]:
     """Solve the MILP with lazily generated interference pairs.
 
@@ -261,6 +293,7 @@ def solve_with_lazy_interference(
             time_limit=time_limit,
             relaxed=False,
             epsilon=epsilon,
+            solver=solver,
         )
 
         if len(pair_array) == 0:

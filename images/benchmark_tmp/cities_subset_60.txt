@@ -1,0 +1,60 @@
+Bad Salzuflen, 52.0862, 8.74434
+Baden-Baden, 48.7606, 8.23975
+Bergisch Gladbach, 50.9856, 7.13298
+Bergkamen, 51.61633, 7.64451
+Berlin Köpenick, 52.44254, 13.58228
+Bielefeld, 52.03333, 8.53333
+Bonn, 50.73438, 7.09549
+Bottrop, 51.52392, 6.9285
+Castrop-Rauxel, 51.55657, 7.31155
+Dessau, 51.83864, 12.24555
+Duisburg, 51.43247, 6.76516
+Esslingen, 48.73961, 9.30473
+Freiburg, 47.9959, 7.85222
+Garbsen, 52.41371, 9.5899
+Gesundbrunnen, 52.55035, 13.39139
+Gummersbach, 51.02608, 7.56473
+Hamburg-Nord, 53.58935, 9.984
+Hamm, 51.68033, 7.82089
+Hannover, 52.37052, 9.73322
+Herford, 52.11457, 8.67343
+Herten, 51.59638, 7.14387
+Hildesheim, 52.15077, 9.95112
+Karlsruhe, 49.00937, 8.40444
+Kiel, 54.32133, 10.13489
+Koblenz, 50.35357, 7.57883
+Kreuzberg, 52.49973, 13.40338
+Langenhagen, 52.44758, 9.73741
+Ludwigsburg, 48.89731, 9.19161
+Ludwigshafen am Rhein, 49.48121, 8.44641
+Lüdenscheid, 51.21977, 7.6273
+Minden, 52.28953, 8.91455
+Mülheim, 51.43218, 6.87967
+Münster, 51.96236, 7.62571
+Neu-Hohenschönhausen, 52.56681, 13.51255
+Neubrandenburg, 53.55735, 13.26105
+Neustadt an der Weinstraße, 49.35009, 8.13886
+Norderstedt, 53.70177, 9.99328
+Nürnberg, 49.45421, 11.07752
+Oberhausen, 51.47805, 6.8625
+Oldenburg, 53.14039, 8.21479
+Plauen, 50.4973, 12.13782
+Recklinghausen, 51.61379, 7.19738
+Remscheid, 51.17983, 7.1925
+Reutlingen, 48.49144, 9.20427
+Rheinhausen, 51.40055, 6.71187
+Salzgitter, 52.15705, 10.4154
+Schweinfurt, 50.04937, 10.22175
+Sindelfingen, 48.7, 9.01667
+Speyer, 49.32083, 8.43111
+Stuttgart, 48.78232, 9.17702
+Universitäts- und Hansestadt Greifswald, 54.08905, 13.40244
+Villingen-Schwenningen, 48.06226, 8.49358
+Wesel, 51.6669, 6.62037
+Wiesbaden, 50.08601, 8.24435
+Willich, 51.26371, 6.54734
+Wilmersdorf, 52.48333, 13.31667
+Winterhude, 53.59368, 10.01123
+Wolfenbüttel, 52.16442, 10.54095
+Worms, 49.63278, 8.35916
+Würzburg, 49.79391, 9.95121
