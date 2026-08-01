@@ -54,10 +54,10 @@ Selected towers with coverage circles (green = dense radius, yellow = sparse rad
 **Germany** — 236 cities, 45 towers
 ![Germany topology](images/final_topology_germany_gurobi.png)
 
-**France** — 30k+ cities (filtered), 66 towers
+**France** — 292 cities (filtered), 66 towers
 ![France topology](images/final_topology_france_gurobi.png)
 
-**Europe** — 50k+ cities, 642 towers
+**Europe** — 1917 cities, 642 towers
 ![Europe topology](images/final_topology_eu_gurobi.png)
 
 ### Runtime scaling
