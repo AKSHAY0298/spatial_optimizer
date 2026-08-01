@@ -15,8 +15,6 @@ python run.py
 
 ```
 ├── run.py                  # CLI entry point + map visualization
-├── data/
-│   └── cities_de_50k.txt   # German cities >50k population
 ├── scripts/
 │   ├── pareto_sweep.py     # ε-constraint Pareto front sweep
 │   └── plot_pareto.py      # Render Pareto front from CSV
