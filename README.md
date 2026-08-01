@@ -51,10 +51,10 @@ Cities are partitioned into dense clusters and noise points, which drives the tw
 
 Selected towers with coverage circles (green = dense radius, yellow = sparse radius). Red dashed lines mark active interference between overlapping pairs.
 
-**Germany** — 236 cities, ~50 towers
+**Germany** — 236 cities, 45 towers
 ![Germany topology](images/final_topology_germany_gurobi.png)
 
-**France** — 30k+ cities (filtered), ~310 towers
+**France** — 30k+ cities (filtered), ~66 towers
 ![France topology](images/final_topology_france_gurobi.png)
 
 **Europe** — 50k+ cities, ~680 towers
